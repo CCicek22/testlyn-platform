@@ -9,22 +9,14 @@ FROM node:24-alpine AS base
 RUN apk add --no-cache libc6-compat
 WORKDIR /repo
 
-# ─── Stage 1: install ────────────────────────────────────────────────────────
-FROM base AS deps
-RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
-COPY apps/web/package.json apps/web/package.json
-COPY packages/ packages/
-RUN pnpm install --frozen-lockfile
-
-# ─── Stage 2: build ──────────────────────────────────────────────────────────
+# ─── Stage 1: build ──────────────────────────────────────────────────────────
 FROM base AS builder
 RUN corepack enable
-COPY --from=deps /repo/node_modules ./node_modules
 COPY . .
+RUN pnpm install --frozen-lockfile
 RUN pnpm --filter=@testlyn/web build
 
-# ─── Stage 3: runtime (Next standalone) ──────────────────────────────────────
+# ─── Stage 2: runtime (Next standalone) ──────────────────────────────────────
 FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
