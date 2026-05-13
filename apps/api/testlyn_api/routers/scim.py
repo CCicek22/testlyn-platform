@@ -41,6 +41,16 @@ def _scim_response(content: dict, status_code: int = 200) -> JSONResponse:
     return JSONResponse(content=content, status_code=status_code, media_type=_SCIM_CONTENT_TYPE)
 
 
+def _assert_scim_enabled() -> None:
+    """Return 503 when SCIM provisioning is disabled for this deployment."""
+    settings = get_settings()
+    if not settings.scim_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SCIM provisioning is not enabled for this deployment",
+        )
+
+
 def _verify_bearer(authorization: str | None) -> None:
     """Verify SCIM bearer token.
 
@@ -85,6 +95,7 @@ async def list_scim_users(
     count: int = Query(default=100, ge=1, le=1000),
     filter: str | None = Query(default=None),
 ) -> JSONResponse:
+    _assert_scim_enabled()
     _verify_bearer(authorization)
     data = await scim_svc.scim_list_users(
         session,
@@ -104,6 +115,7 @@ async def create_scim_user(
     session: SessionDep,
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
+    _assert_scim_enabled()
     _verify_bearer(authorization)
     payload = await request.json()
     data = await scim_svc.scim_create_user(session, org_id, payload, _base_url(request))
@@ -118,6 +130,7 @@ async def get_scim_user(
     session: SessionDep,
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
+    _assert_scim_enabled()
     _verify_bearer(authorization)
     data = await scim_svc.scim_get_user(session, org_id, user_id, _base_url(request))
     if data is None:
@@ -135,6 +148,7 @@ async def replace_scim_user(
     session: SessionDep,
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
+    _assert_scim_enabled()
     _verify_bearer(authorization)
     payload = await request.json()
     data = await scim_svc.scim_replace_user(
@@ -154,6 +168,7 @@ async def delete_scim_user(
     session: SessionDep,
     authorization: str | None = Header(default=None),
 ) -> None:
+    _assert_scim_enabled()
     _verify_bearer(authorization)
     deleted = await scim_svc.scim_delete_user(session, org_id, user_id)
     if not deleted:
@@ -173,6 +188,7 @@ async def list_scim_groups(
     start_index: int = Query(default=1, ge=1, alias="startIndex"),
     count: int = Query(default=100, ge=1, le=1000),
 ) -> JSONResponse:
+    _assert_scim_enabled()
     _verify_bearer(authorization)
     data = await scim_svc.scim_list_groups(org_id, _base_url(request), start_index, count)
     return _scim_response(data)
