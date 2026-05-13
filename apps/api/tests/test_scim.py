@@ -8,8 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from testlyn_api.models.org import OrgMember, Organization
+from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.user import User
 from testlyn_api.services.scim import (
     SCIM_LIST_SCHEMA,
@@ -23,7 +22,6 @@ from testlyn_api.services.scim import (
     scim_replace_user,
     user_to_scim,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -389,6 +387,7 @@ async def test_api_bearer_token_rejected_when_bypass_disabled(
 
     class _FakeSettings:
         dev_auth_bypass = False
+        scim_enabled = True
 
     # Patch where the router module resolves get_settings (its own import reference)
     monkeypatch.setattr(scim_router_mod, "get_settings", lambda: _FakeSettings())

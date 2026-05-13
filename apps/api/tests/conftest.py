@@ -25,6 +25,7 @@ os.environ.setdefault("WEB_BASE_URL", "http://localhost:3000")
 os.environ.setdefault("K6_IMAGE_TAG", "grafana/k6:1.3.0")
 os.environ.setdefault("SSE_HEARTBEAT_INTERVAL", "0.5")
 os.environ.setdefault("SSE_MAX_TICKS", "1")
+os.environ.setdefault("SCIM_ENABLED", "true")
 
 import fakeredis  # type: ignore[import-untyped]
 

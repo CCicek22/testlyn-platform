@@ -5,7 +5,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from testlyn_api.models.org import Organization
+from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test as TestModel
 from testlyn_api.models.test_run import TestRun as TestRunModel
@@ -23,6 +23,10 @@ async def _seed_run(session: AsyncSession, state: str = "running") -> uuid.UUID:
         slug="dev-org",
     )
     session.add_all([user, org])
+    await session.flush()
+
+    member = OrgMember(org_id=org.id, user_id=user.id, role="viewer")
+    session.add(member)
     await session.flush()
 
     proj = Project(org_id=org.id, name="P", slug="p")
