@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     dev_auth_bypass: bool = False
+    # Emails that auto-become owners of the "testlyn-dev" org on first signin.
+    # Empty in tests + prod-proper; set on the dev Cloud Run service env via TF.
+    bootstrap_admin_emails: list[str] = []
+    bootstrap_org_slug: str = "testlyn-dev"
+    bootstrap_org_name: str = "Testlyn Dev"
 
     # --- Mode ---
     run_mode: str = "cloud"  # 'cloud' | 'docker'

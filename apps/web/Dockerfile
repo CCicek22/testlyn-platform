@@ -12,6 +12,26 @@ WORKDIR /repo
 # ─── Stage 1: build ──────────────────────────────────────────────────────────
 FROM base AS builder
 RUN corepack enable
+
+# NEXT_PUBLIC_* values must be present at build time — Next bakes them into
+# the static bundle. Defaults are CI-safe placeholders; the workflow passes
+# real values from GitHub secrets via docker/build-push-action build-args.
+ARG NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyDUMMY_BUILD_PLACEHOLDER
+ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=placeholder.firebaseapp.com
+ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID=placeholder
+ARG NEXT_PUBLIC_FIREBASE_APP_ID=1:000:web:placeholder
+ARG NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=placeholder.firebasestorage.app
+ARG NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=000000000000
+ARG NEXT_PUBLIC_API_BASE_URL=https://api.dev.testlyn.example.com
+
+ENV NEXT_PUBLIC_FIREBASE_API_KEY=$NEXT_PUBLIC_FIREBASE_API_KEY \
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=$NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID=$NEXT_PUBLIC_FIREBASE_PROJECT_ID \
+    NEXT_PUBLIC_FIREBASE_APP_ID=$NEXT_PUBLIC_FIREBASE_APP_ID \
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=$NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=$NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
+    NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter=@testlyn/web build
