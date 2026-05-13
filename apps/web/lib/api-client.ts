@@ -63,6 +63,43 @@ import type {
   PatchTestRequest,
 } from "@testlyn/shared";
 
+// ─── Webhook types (inline until shared-types is regenerated from OpenAPI) ───
+
+export interface WebhookEndpoint {
+  id: string;
+  org_id: string;
+  url: string;
+  events: string[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  endpoint_id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  status: string;
+  attempts: number;
+  last_error: string | null;
+  next_retry_at: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface CreateWebhookEndpointRequest {
+  url: string;
+  events: string[];
+  active?: boolean;
+}
+
+export interface PatchWebhookEndpointRequest {
+  url?: string;
+  events?: string[];
+  active?: boolean;
+}
+
 export const api = {
   me: () => request<MeResponse>("/v1/me"),
 
@@ -111,5 +148,72 @@ export const api = {
     cancel: (id: string) =>
       request<void>(`/v1/runs/${id}/cancel`, { method: "POST" }),
     streamUrl: (id: string) => `${BASE_URL}/v1/runs/${id}/stream`,
+  },
+
+  webhooks: {
+    listEndpoints: (orgId: string) =>
+      request<WebhookEndpoint[]>(`/v1/webhooks-admin/orgs/${orgId}/endpoints`),
+    createEndpoint: (orgId: string, body: CreateWebhookEndpointRequest) =>
+      request<WebhookEndpoint>(`/v1/webhooks-admin/orgs/${orgId}/endpoints`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    getEndpoint: (id: string) =>
+      request<WebhookEndpoint>(`/v1/webhooks-admin/endpoints/${id}`),
+    patchEndpoint: (id: string, body: PatchWebhookEndpointRequest) =>
+      request<WebhookEndpoint>(`/v1/webhooks-admin/endpoints/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    deleteEndpoint: (id: string) =>
+      request<void>(`/v1/webhooks-admin/endpoints/${id}`, { method: "DELETE" }),
+
+    listDeliveries: (endpointId: string, status?: string, limit = 50) => {
+      const params = new URLSearchParams({ endpoint_id: endpointId, limit: String(limit) });
+      if (status) params.set("status", status);
+      return request<WebhookDelivery[]>(`/v1/webhooks-admin/deliveries?${params}`);
+    },
+    replayDelivery: (deliveryId: string) =>
+      request<WebhookDelivery>(
+        `/v1/webhooks-admin/deliveries/${deliveryId}/replay`,
+        { method: "POST" }
+      ),
+  },
+
+  insights: {
+    latest: <T>(orgId: string) =>
+      request<T>(`/v1/orgs/${orgId}/insights/latest`),
+    snapshots: <T>(orgId: string, limit = 24) =>
+      request<T[]>(`/v1/orgs/${orgId}/insights/snapshots?limit=${limit}`),
+  },
+
+  syntheticData: {
+    getJob: <T>(jobId: string) =>
+      request<T>(`/v1/products/synthetic-data/jobs/${jobId}`),
+    generate: (body: Record<string, unknown>) =>
+      request<{ job_id: string; status: string }>(
+        "/v1/products/synthetic-data/generate",
+        { method: "POST", body: JSON.stringify(body) }
+      ),
+  },
+
+  apiContract: {
+    getScan: <T>(scanId: string) =>
+      request<T>(`/v1/products/api-contract/scans/${scanId}`),
+    scan: (body: Record<string, unknown>) =>
+      request<{ scan_id: string; status: string }>(
+        "/v1/products/api-contract/scan",
+        { method: "POST", body: JSON.stringify(body) }
+      ),
+  },
+
+  security: {
+    getScan: <T>(scanId: string) =>
+      request<T>(`/v1/products/security/scans/${scanId}`),
+    scan: (body: Record<string, unknown>) =>
+      request<{ scan_id: string; status: string }>(
+        "/v1/products/security/scan",
+        { method: "POST", body: JSON.stringify(body) }
+      ),
   },
 } as const;

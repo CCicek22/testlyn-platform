@@ -26,19 +26,17 @@ os.environ.setdefault("K6_IMAGE_TAG", "grafana/k6:1.3.0")
 os.environ.setdefault("SSE_HEARTBEAT_INTERVAL", "0.5")
 os.environ.setdefault("SSE_MAX_TICKS", "1")
 
-from sqlalchemy import JSON
-from sqlalchemy.dialects.postgresql import JSONB
-
-from testlyn_api.core.db import Base
-from testlyn_api.deps import get_session
-from testlyn_api.main import app
+import fakeredis  # type: ignore[import-untyped]
 
 # Patch the rate limiter to use fakeredis so tests don't attempt real TCP
 # connections to Redis (which hangs until OS TCP timeout fires).
 import fakeredis.aioredis  # type: ignore[import-untyped]
-import fakeredis  # type: ignore[import-untyped]
-
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
+from testlyn_api.core.db import Base
 from testlyn_api.core.rate_limit import RateLimiter
+from testlyn_api.deps import get_session
+from testlyn_api.main import app
 
 # Shared FakeServer so all FakeRedis instances share the same key space within
 # a test, but we can flush between tests.

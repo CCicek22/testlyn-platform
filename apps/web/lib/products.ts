@@ -3,10 +3,10 @@
  * Accent colors are frozen per CLAUDE.md §4 — do not change without user approval.
  */
 
-import { Zap, FlaskConical, Eye } from "lucide-react";
+import { Zap, FlaskConical, Eye, Database, GitCompare, Shield } from "lucide-react";
 import type { ElementType } from "react";
 
-export type Product = "load" | "functional" | "a11y";
+export type Product = "load" | "functional" | "a11y" | "synthetic_data" | "api_contract" | "security";
 
 export interface ProductMeta {
   readonly id: Product;
@@ -37,6 +37,30 @@ export const PRODUCTS: readonly ProductMeta[] = [
     label: "Accessibility",
     accent: "#14B8A6",
     icon: Eye,
+    available: true,
+  },
+  {
+    id: "synthetic_data",
+    label: "Synthetic Data",
+    /** Frozen per CLAUDE.md §4 */
+    accent: "#F59E0B",
+    icon: Database,
+    available: true,
+  },
+  {
+    id: "api_contract",
+    label: "API Contract",
+    /** Frozen per CLAUDE.md §4 */
+    accent: "#06B6D4",
+    icon: GitCompare,
+    available: true,
+  },
+  {
+    id: "security",
+    label: "Security",
+    /** Frozen per CLAUDE.md §4 */
+    accent: "#DC2626",
+    icon: Shield,
     available: true,
   },
 ] as const;
