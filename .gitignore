@@ -69,3 +69,4 @@ tmp/
 playwright-report/
 test-results/
 .playwright/
+.envrc

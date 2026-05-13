@@ -110,7 +110,7 @@ def main() -> None:
     # In production the BQ / GCS clients are constructed here with
     # Workload Identity (no explicit credentials needed on Cloud Run).
     try:
-        from google.cloud import bigquery
+        from google.cloud import bigquery  # noqa: I001
         from google.cloud import storage  # type: ignore[attr-defined]
 
         bq_client: Any = bigquery.Client()
