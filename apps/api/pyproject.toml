@@ -52,6 +52,10 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 
+[tool.ruff.lint]
+# B008: FastAPI canonical pattern is `param: T = Query(...)` — false positive here.
+extend-ignore = ["B008"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true

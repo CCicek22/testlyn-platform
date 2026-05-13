@@ -29,7 +29,6 @@ from sqlalchemy import select
 from testlyn_api.core.permissions import perm_dep
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.sso_provider import SsoProvider
-from testlyn_api.services.sso import FeatureDisabledError
 
 log = structlog.get_logger(__name__)
 

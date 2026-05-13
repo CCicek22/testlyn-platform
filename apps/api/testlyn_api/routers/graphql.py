@@ -12,10 +12,9 @@ can be accessed via Apollo Studio or the Strawberry CLI if needed in dev.
 """
 from __future__ import annotations
 
-from fastapi import Depends, Request
+from fastapi import Request
 from strawberry.fastapi import GraphQLRouter
 
-from testlyn_api.core.auth import CurrentUser
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.graphql import schema
 

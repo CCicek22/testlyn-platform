@@ -9,7 +9,6 @@ from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test as TestModel
 from testlyn_api.models.test_run import TestRun as TestRunModel
 
-
 _DEV_ORG_ID = uuid.UUID("00000000-0000-0000-0000-d3eff3e10102")
 
 

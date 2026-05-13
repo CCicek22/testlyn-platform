@@ -11,9 +11,7 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
-
 from testlyn_api.core.runner import RunnerNotAvailable
-
 
 # ---------------------------------------------------------------------------
 # Runner protocol conformance

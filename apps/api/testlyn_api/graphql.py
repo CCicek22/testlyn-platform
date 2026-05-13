@@ -8,7 +8,6 @@ All resolvers delegate to the same async SQLAlchemy session used by REST.
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
 import strawberry
 from sqlalchemy import select
@@ -81,14 +80,14 @@ class GQLScenario:
 @strawberry.type
 class Query:
     @strawberry.field
-    async def me(self, info: strawberry.types.Info) -> Optional[GQLUser]:
+    async def me(self, info: strawberry.types.Info) -> GQLUser | None:
         user: CurrentUser = info.context["user"]
         return GQLUser(id=strawberry.ID(str(user.id)), email=user.email)
 
     @strawberry.field
     async def org(
         self, info: strawberry.types.Info, id: strawberry.ID
-    ) -> Optional[GQLOrg]:
+    ) -> GQLOrg | None:
         from testlyn_api.models.org import Organization
 
         session: AsyncSession = info.context["session"]
@@ -154,7 +153,7 @@ class Query:
 
     @strawberry.field
     async def plugins(
-        self, info: strawberry.types.Info, kind: Optional[str] = None
+        self, info: strawberry.types.Info, kind: str | None = None
     ) -> list[GQLPlugin]:
         from testlyn_api.models.plugin import Plugin
 
@@ -180,7 +179,7 @@ class Query:
 
     @strawberry.field
     async def scenarios(
-        self, info: strawberry.types.Info, product: Optional[str] = None
+        self, info: strawberry.types.Info, product: str | None = None
     ) -> list[GQLScenario]:
         from testlyn_api.models.scenario import Scenario
 

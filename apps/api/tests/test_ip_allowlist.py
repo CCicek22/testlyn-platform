@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from testlyn_api.core.ip_allowlist import (
     _cache,
     _extract_client_ip,
@@ -17,7 +16,6 @@ from testlyn_api.core.ip_allowlist import (
 )
 from testlyn_api.models.org import Organization
 from testlyn_api.models.org_ip_allowlist import OrgIpAllowlist
-
 
 # ---------------------------------------------------------------------------
 # Helpers

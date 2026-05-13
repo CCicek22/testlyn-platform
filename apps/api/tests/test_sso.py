@@ -7,10 +7,8 @@ import uuid
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from testlyn_api.models.org import OrgMember, Organization
+from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.sso_provider import SsoProvider
-from testlyn_api.models.user import User
 from testlyn_api.services.sso import (
     FeatureDisabledError,
     OidcHandler,
@@ -18,7 +16,6 @@ from testlyn_api.services.sso import (
     get_active_provider,
     provision_sso_user,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

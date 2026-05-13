@@ -33,16 +33,17 @@ import fakeredis  # type: ignore[import-untyped]
 # Patch the rate limiter to use fakeredis so tests don't attempt real TCP
 # connections to Redis (which hangs until OS TCP timeout fires).
 import fakeredis.aioredis  # type: ignore[import-untyped]
-from sqlalchemy import JSON, text
+from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import JSONB
 from testlyn_api.core.db import Base
-from testlyn_api.models.org import Organization, OrgMember
-from testlyn_api.models.user import User
 from testlyn_api.core.rate_limit import RateLimiter
 from testlyn_api.deps import get_session
 from testlyn_api.main import app
+from testlyn_api.models.org import Organization, OrgMember
+from testlyn_api.models.user import User
 
-def _enable_sqlite_fk(dbapi_conn, connection_record):  # noqa: ANN001
+
+def _enable_sqlite_fk(dbapi_conn, connection_record):
     """Enable FK enforcement for SQLite connections (no-op on other dialects)."""
     dbapi_conn.execute("PRAGMA foreign_keys = ON")
 
@@ -105,7 +106,7 @@ async def setup_db():
 
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
-async def _seed_dev_entities(setup_db):  # noqa: ANN001
+async def _seed_dev_entities(setup_db):
     """Pre-seed dev user + org + membership so _seed_dev_user() early-returns.
 
     With PRAGMA foreign_keys = ON, SQLAlchemy's add_all([user, org, member])
@@ -170,7 +171,7 @@ _DEV_ORG_ID = uuid.UUID("00000000-0000-0000-0000-d3eff3e10102")
 
 
 @pytest.fixture
-async def dev_org_id(_seed_dev_entities) -> uuid.UUID:  # noqa: ANN001
+async def dev_org_id(_seed_dev_entities) -> uuid.UUID:
     """Return the pre-seeded dev org UUID.
 
     The org row is guaranteed by _seed_dev_entities (autouse), so callers get
