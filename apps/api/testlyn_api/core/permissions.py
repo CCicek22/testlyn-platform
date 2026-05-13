@@ -12,15 +12,12 @@ Each cell in the matrix is the *minimum* role required for (action, resource).
 """
 
 import uuid
-from typing import Annotated
 
 import structlog
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from testlyn_api.core.auth import CurrentUser
-from testlyn_api.core.db import get_session
 from testlyn_api.models.org import OrgMember
 from testlyn_api.models.project_role_override import ProjectRoleOverride
 
@@ -118,114 +115,6 @@ async def _resolve_role(
     return org_role
 
 
-# ── Public dependency factory ─────────────────────────────────────────────────
-
-
-def requires(
-    action: str,
-    resource_kind: str,
-    *,
-    org_id_param: str = "org_id",
-    project_id_param: str | None = None,
-) -> type:
-    """Return a FastAPI dependency class that enforces the permission matrix.
-
-    Usage in route::
-
-        @router.post("/orgs/{org_id}/targets")
-        async def create_target(
-            org_id: uuid.UUID,
-            _perm: PermDep = Depends(requires("write", "target")),
-            ...
-        )
-
-    The dependency reads ``org_id`` (and optionally ``project_id``) from the
-    request path, resolves the caller's effective role, and raises 403 if the
-    role is insufficient.
-    """
-    required_role = PERMISSION_MATRIX.get((action, resource_kind))
-    if required_role is None:
-        raise ValueError(
-            f"No permission defined for ({action!r}, {resource_kind!r}). "
-            "Add it to PERMISSION_MATRIX."
-        )
-
-    class _PermissionCheck:
-        def __init__(
-            self,
-            request_obj: Annotated[
-                object,
-                Depends(lambda: None),  # placeholder — real deps below
-            ] = None,
-        ) -> None:
-            pass
-
-    # Build a proper async dependency function instead of a class
-    # (classes as deps don't easily get path params injected).
-    async def _check(
-        *,
-        request: "fastapi.Request",
-        current_user: CurrentUser = Depends(get_current_user),  # type: ignore[assignment]
-        session: AsyncSession = Depends(get_session),  # type: ignore[assignment]
-    ) -> None:
-        from fastapi import Request  # noqa: PLC0415
-
-        oid_raw = request.path_params.get(org_id_param)
-        if oid_raw is None:
-            # org_id not in path — skip RBAC (internal route)
-            return
-
-        org_id = uuid.UUID(str(oid_raw))
-        pid: uuid.UUID | None = None
-        if project_id_param:
-            pid_raw = request.path_params.get(project_id_param)
-            if pid_raw is not None:
-                pid = uuid.UUID(str(pid_raw))
-
-        role = await _resolve_role(
-            user_id=current_user.id,
-            org_id=org_id,
-            project_id=pid,
-            session=session,
-        )
-
-        if role is None:
-            log.warning(
-                "rbac.not_member",
-                user_id=str(current_user.id),
-                org_id=str(org_id),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not a member of this organisation",
-            )
-
-        if _rank(role) < _rank(required_role):
-            log.warning(
-                "rbac.insufficient_role",
-                user_id=str(current_user.id),
-                org_id=str(org_id),
-                role=role,
-                required=required_role,
-                action=action,
-                resource=resource_kind,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Role '{role}' insufficient — '{required_role}' required for {action}:{resource_kind}",
-            )
-
-    # Attach metadata for introspection
-    _check.__name__ = f"perm_{action}_{resource_kind}"
-
-    # Import here to avoid circular at module level
-    import fastapi  # noqa: PLC0415
-
-    return Annotated[None, Depends(fastapi.Request), Depends(_check)]
-
-
-# ── Convenience type aliases (used by routers) ────────────────────────────────
-
 async def _enforce_perm(
     action: str,
     resource_kind: str,
@@ -264,7 +153,7 @@ def perm_dep(action: str, resource_kind: str, **kwargs: str) -> object:
     Works around PEP-563 (from __future__ import annotations) by setting
     ``__annotations__`` explicitly so FastAPI can evaluate them at import time.
     """
-    import fastapi  # noqa: PLC0415
+    import fastapi
 
     async def _dep(request, session, current_user) -> None:  # type: ignore[no-untyped-def]
         required = PERMISSION_MATRIX.get((action, resource_kind))
@@ -303,7 +192,7 @@ def perm_dep(action: str, resource_kind: str, **kwargs: str) -> object:
     # even when the module uses `from __future__ import annotations`.
     # Use _resolve_current_user (which wraps get_current_user with proper
     # session injection) instead of get_current_user directly.
-    from testlyn_api.deps import CurrentUserDep, SessionDep  # noqa: PLC0415
+    from testlyn_api.deps import CurrentUserDep, SessionDep
 
     _dep.__annotations__ = {
         "request": fastapi.Request,

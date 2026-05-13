@@ -6,6 +6,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test
@@ -38,7 +39,8 @@ async def create_test(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> TestOut:
-    await _get_project_or_404(project_id, session)
+    project = await _get_project_or_404(project_id, session)
+    await _enforce_perm("write", "test", user_id=current_user.id, org_id=project.org_id, project_id=project_id, session=session)
 
     script_uri: str | None = None
     if body.script_inline:

@@ -6,6 +6,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.core.tasks import enqueue_run
 from testlyn_api.deps import AuditDep, CurrentUserDep, SessionDep
 from testlyn_api.models.org import Organization
@@ -46,6 +47,7 @@ async def create_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
 
     audit.set_org(org.id)
+    await _enforce_perm("run", "test", user_id=current_user.id, org_id=org.id, project_id=project.id, session=session)
 
     # Extract VU/duration from test config (defaults: 1 VU, 60s)
     config: dict = test.config or {}

@@ -49,6 +49,31 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+// ─── Raw streaming helper (returns Response, not parsed JSON) ────────────────
+
+async function requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getIdToken();
+
+  const headers = new Headers(init.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+
+  if (!res.ok) {
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text();
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  return res;
+}
+
 // ─── Typed endpoint helpers ─────────────────────────────────────────────────
 
 import type {
@@ -62,6 +87,36 @@ import type {
   CreateTestRequest,
   PatchTestRequest,
 } from "@testlyn/shared";
+
+// ─── Audit types (inline until shared-types is regenerated from OpenAPI) ─────
+
+export interface AuditLogEntry {
+  id: string;
+  org_id: string;
+  actor_user_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export interface AuditLogPage {
+  items: AuditLogEntry[];
+  cursor: string | null;
+}
+
+export interface AuditListParams {
+  limit?: number;
+  cursor?: string;
+  action?: string;
+  actor_id?: string;
+  from_dt?: string;
+  to_dt?: string;
+}
 
 // ─── Webhook types (inline until shared-types is regenerated from OpenAPI) ───
 
@@ -178,6 +233,48 @@ export const api = {
         `/v1/webhooks-admin/deliveries/${deliveryId}/replay`,
         { method: "POST" }
       ),
+  },
+
+  audit: {
+    list: (orgId: string, params: AuditListParams = {}) => {
+      const p = new URLSearchParams();
+      if (params.limit) p.set("limit", String(params.limit));
+      if (params.cursor) p.set("cursor", params.cursor);
+      if (params.action) p.set("action", params.action);
+      if (params.actor_id) p.set("actor_id", params.actor_id);
+      if (params.from_dt) p.set("from_dt", params.from_dt);
+      if (params.to_dt) p.set("to_dt", params.to_dt);
+      const qs = p.toString();
+      return request<AuditLogPage>(
+        `/v1/orgs/${orgId}/audit-log${qs ? `?${qs}` : ""}`
+      );
+    },
+
+    exportCsv: async (orgId: string, params: Omit<AuditListParams, "cursor"> = {}) => {
+      const p = new URLSearchParams();
+      if (params.limit) p.set("limit", String(params.limit));
+      if (params.action) p.set("action", params.action);
+      if (params.actor_id) p.set("actor_id", params.actor_id);
+      if (params.from_dt) p.set("from_dt", params.from_dt);
+      if (params.to_dt) p.set("to_dt", params.to_dt);
+      const qs = p.toString();
+      return requestRaw(
+        `/v1/orgs/${orgId}/audit-log.csv${qs ? `?${qs}` : ""}`
+      );
+    },
+
+    exportJson: async (orgId: string, params: Omit<AuditListParams, "cursor"> = {}) => {
+      const p = new URLSearchParams();
+      if (params.limit) p.set("limit", String(params.limit));
+      if (params.action) p.set("action", params.action);
+      if (params.actor_id) p.set("actor_id", params.actor_id);
+      if (params.from_dt) p.set("from_dt", params.from_dt);
+      if (params.to_dt) p.set("to_dt", params.to_dt);
+      const qs = p.toString();
+      return requestRaw(
+        `/v1/orgs/${orgId}/audit-log.json${qs ? `?${qs}` : ""}`
+      );
+    },
   },
 
   insights: {
