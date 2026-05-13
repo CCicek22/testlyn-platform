@@ -87,6 +87,24 @@ async def create_run(
     return RunOut.model_validate(run)
 
 
+@router.get("/runs", response_model=list[RunOut])
+async def list_runs(
+    current_user: CurrentUserDep,
+    session: SessionDep,
+    product: str | None = None,
+) -> list[RunOut]:
+    """List runs triggered by the current user across all orgs they belong to."""
+    from sqlalchemy import and_
+
+    clauses = [TestRun.triggered_by == current_user.id]
+    if product is not None:
+        clauses.append(TestRun.product == product)
+    result = await session.execute(
+        select(TestRun).where(and_(*clauses)).order_by(TestRun.id.desc()).limit(200)
+    )
+    return [RunOut.model_validate(r) for r in result.scalars().all()]
+
+
 @router.get("/runs/{run_id}", response_model=RunOut)
 async def get_run(
     run_id: uuid.UUID,
@@ -94,6 +112,70 @@ async def get_run(
     session: SessionDep,
 ) -> RunOut:
     run = await _get_run_or_404(run_id, session)
+    # Traverse run → test → project → org to enforce RBAC
+    test = await session.get(Test, run.test_id)
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    project = await session.get(Project, test.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await _enforce_perm("read", "test_run", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
+    return RunOut.model_validate(run)
+
+
+@router.get("/runs/{run_id}/summary")
+async def get_run_summary(
+    run_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+) -> dict:
+    """Return the run summary JSON stored in GCS (if available)."""
+    run = await _get_run_or_404(run_id, session)
+    test = await session.get(Test, run.test_id)
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    project = await session.get(Project, test.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await _enforce_perm("read", "test_run", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
+    return {
+        "run_id": str(run.id),
+        "summary_uri": run.summary_uri,
+        "state": run.state,
+        "error_reason": run.error_reason,
+    }
+
+
+@router.post("/runs/{run_id}/cancel", status_code=status.HTTP_200_OK, response_model=RunOut)
+async def cancel_run(
+    run_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+) -> RunOut:
+    """Cancel a queued or running test run."""
+    from datetime import UTC, datetime
+
+    run = await _get_run_or_404(run_id, session)
+    test = await session.get(Test, run.test_id)
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    project = await session.get(Project, test.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await _enforce_perm("run", "test", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
+
+    if run.state not in {"queued", "running"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run is in state {run.state!r} and cannot be cancelled",
+        )
+
+    run.state = "cancelled"
+    run.finished_at = datetime.now(tz=UTC)
+    await session.commit()
+    await session.refresh(run)
+
+    log.info("run.cancelled", run_id=str(run_id), user_id=str(current_user.id))
     return RunOut.model_validate(run)
 
 

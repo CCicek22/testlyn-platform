@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.test import Test
 from testlyn_api.services import scheduler as svc
@@ -81,7 +82,11 @@ async def create_schedule(
 
     proj_result = await session.execute(sa_select(Project).where(Project.id == test.project_id))
     project = proj_result.scalar_one_or_none()
-    org_id = str(project.org_id) if project else ""
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    org_id = str(project.org_id)
+
+    await _enforce_perm("write", "test", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
 
     handle = await svc.create_schedule(
         test_id=str(test_id),
@@ -103,6 +108,10 @@ async def delete_schedule(
     handle = _registry.get(schedule_id)
     if handle is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+
+    import uuid as _uuid
+
+    await _enforce_perm("write", "test", user_id=current_user.id, org_id=_uuid.UUID(handle.org_id), session=session)
 
     await svc.delete_schedule(handle)
     _registry.pop(schedule_id, None)

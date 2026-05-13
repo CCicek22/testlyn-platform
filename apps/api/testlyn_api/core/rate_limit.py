@@ -6,6 +6,7 @@ served, a warning is logged per unavailability window.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from collections import defaultdict
 from typing import Any
@@ -145,7 +146,7 @@ class RateLimiter:
         """
         global _redis_unavailable_logged
         limit = TIER_RPM.get(plan, TIER_RPM["free"])
-        key = f"rl:v1:{org_id}"
+        key = "rl:v1:" + hashlib.sha256(org_id.encode()).hexdigest()[:32]
 
         redis_client = await self._get_redis()
         if redis_client is None:

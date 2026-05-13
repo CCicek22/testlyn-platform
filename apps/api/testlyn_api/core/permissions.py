@@ -162,7 +162,7 @@ def perm_dep(action: str, resource_kind: str, **kwargs: str) -> object:
 
         oid_raw = request.path_params.get(kwargs.get("org_id_param", "org_id"))
         if oid_raw is None:
-            return
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="org_id missing from path")
 
         org_id = uuid.UUID(str(oid_raw))
         pid: uuid.UUID | None = None

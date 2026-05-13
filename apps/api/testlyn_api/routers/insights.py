@@ -8,6 +8,7 @@ import structlog
 from fastapi import APIRouter, Query
 from sqlalchemy import desc, select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.insights_snapshot import InsightsSnapshot
 
@@ -51,6 +52,7 @@ async def list_snapshots(
     Snapshots are written by the Cloud Scheduler cron that calls
     POST /v1/internal/orgs/:id/insights/refresh.
     """
+    await _enforce_perm("read", "org", user_id=current_user.id, org_id=org_id, session=session)
     result = await session.execute(
         select(InsightsSnapshot)
         .where(InsightsSnapshot.org_id == org_id)
@@ -78,6 +80,7 @@ async def get_latest_snapshot(
 
     Returns a stub with null KPIs when no snapshot exists yet.
     """
+    await _enforce_perm("read", "org", user_id=current_user.id, org_id=org_id, session=session)
     result = await session.execute(
         select(InsightsSnapshot)
         .where(InsightsSnapshot.org_id == org_id)

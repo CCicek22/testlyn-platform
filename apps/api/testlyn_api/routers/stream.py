@@ -10,8 +10,11 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.core.sse import heartbeat_generator
 from testlyn_api.deps import CurrentUserDep, SessionDep
+from testlyn_api.models.project import Project
+from testlyn_api.models.test import Test
 from testlyn_api.models.test_run import TestRun
 from testlyn_api.products.load import bq_queries
 
@@ -33,6 +36,15 @@ async def stream_run(
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+    # RBAC: traverse run → test → project → org
+    test = await session.get(Test, run.test_id)
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    project = await session.get(Project, test.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await _enforce_perm("read", "test_run", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
 
     from testlyn_api.config import get_settings
 

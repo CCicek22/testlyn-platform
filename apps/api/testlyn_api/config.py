@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     # --- Mode ---
     run_mode: str = "cloud"  # 'cloud' | 'docker'
 
+    # --- Internal service auth ---
+    # Shared secret for /v1/internal/* endpoints (Cloud Tasks → API).
+    # Optional in docker mode; required in cloud mode when set.
+    internal_token: str = ""
+
+    # --- SCIM ---
+    scim_enabled: bool = False
+
     # --- Web ---
     web_base_url: str = "http://localhost:3000"
 
@@ -64,6 +72,12 @@ class Settings(BaseSettings):
         if v not in {"cloud", "docker"}:
             raise ValueError("run_mode must be 'cloud' or 'docker'")
         return v
+
+    @model_validator(mode="after")
+    def _no_bypass_in_cloud(self) -> Settings:
+        if self.dev_auth_bypass and self.run_mode == "cloud":
+            raise ValueError("dev_auth_bypass must not be True when run_mode='cloud'")
+        return self
 
 
 @lru_cache

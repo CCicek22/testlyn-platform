@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.models.usage import UsageRecord
@@ -44,6 +44,16 @@ class QuotaService:
         self._session = session
 
     async def _get_or_create_usage(self, org_id: object, month: str) -> UsageRecord:
+        # Advisory lock prevents TOCTOU race when two runs start simultaneously
+        # for the same org. Lock key derived from org_id hash — fits bigint range.
+        # Raw SQL here is an explicit exception to §6 (no raw SQL in app code);
+        # pg_advisory_xact_lock has no SQLAlchemy ORM equivalent.
+        # Skipped on non-Postgres backends (e.g. SQLite in tests).
+        dialect = self._session.bind.dialect.name if self._session.bind else ""  # type: ignore[union-attr]
+        if dialect == "postgresql":
+            lock_key = hash(str(org_id)) & 0x7FFFFFFFFFFFFFFF
+            await self._session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
+
         result = await self._session.execute(
             select(UsageRecord).where(
                 UsageRecord.org_id == org_id,  # type: ignore[arg-type]
