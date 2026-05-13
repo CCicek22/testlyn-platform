@@ -10,9 +10,16 @@ from testlyn_api.core.rate_limit import RateLimitMiddleware
 from testlyn_api.products.a11y.routes import router as a11y_router
 from testlyn_api.products.a11y.routes import runs_router as a11y_runs_router
 from testlyn_api.products.api_contract.routes import router as api_contract_router
+from testlyn_api.products.cicd_insights.routes import router as cicd_insights_router
+from testlyn_api.products.eng_analytics.routes import router as eng_analytics_router
 from testlyn_api.products.functional.routes import router as functional_router
+from testlyn_api.products.mobile.routes import router as mobile_router
+from testlyn_api.products.qa_maturity.routes import router as qa_maturity_router
+from testlyn_api.products.rum.routes import router as rum_router
 from testlyn_api.products.security.routes import router as security_router
 from testlyn_api.products.synthetic_data.routes import router as synthetic_data_router
+from testlyn_api.products.tdm.routes import router as tdm_router
+from testlyn_api.products.visual.routes import router as visual_router
 from testlyn_api.routers import (
     audit,
     auth,
@@ -83,6 +90,13 @@ app.include_router(synthetic_data_router)
 app.include_router(api_contract_router)
 app.include_router(security_router)
 app.include_router(insights.router)
+app.include_router(mobile_router)
+app.include_router(visual_router)
+app.include_router(rum_router)
+app.include_router(tdm_router)
+app.include_router(qa_maturity_router)
+app.include_router(eng_analytics_router)
+app.include_router(cicd_insights_router)
 
 
 @app.get("/healthz", include_in_schema=False)

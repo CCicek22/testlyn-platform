@@ -3,10 +3,37 @@
  * Accent colors are frozen per CLAUDE.md §4 — do not change without user approval.
  */
 
-import { Zap, FlaskConical, Eye, Database, GitCompare, Shield } from "lucide-react";
+import {
+  Zap,
+  FlaskConical,
+  Eye,
+  Database,
+  GitCompare,
+  Shield,
+  Smartphone,
+  ScanEye,
+  Users,
+  FolderSync,
+  ClipboardCheck,
+  BarChart3,
+  GitBranch,
+} from "lucide-react";
 import type { ElementType } from "react";
 
-export type Product = "load" | "functional" | "a11y" | "synthetic_data" | "api_contract" | "security";
+export type Product =
+  | "load"
+  | "functional"
+  | "a11y"
+  | "synthetic_data"
+  | "api_contract"
+  | "security"
+  | "mobile"
+  | "visual"
+  | "rum"
+  | "tdm"
+  | "qa_maturity"
+  | "eng_analytics"
+  | "cicd_insights";
 
 export interface ProductMeta {
   readonly id: Product;
@@ -62,6 +89,56 @@ export const PRODUCTS: readonly ProductMeta[] = [
     accent: "#DC2626",
     icon: Shield,
     available: true,
+  },
+  // Phase 4 products — available: false renders a "Phase 4 GA" badge in sidebar
+  {
+    id: "mobile",
+    label: "Mobile",
+    accent: "#6366F1",
+    icon: Smartphone,
+    available: false,
+  },
+  {
+    id: "visual",
+    label: "Visual Regression",
+    accent: "#A855F7",
+    icon: ScanEye,
+    available: false,
+  },
+  {
+    id: "rum",
+    label: "Real User Monitoring",
+    accent: "#0EA5E9",
+    icon: Users,
+    available: false,
+  },
+  {
+    id: "tdm",
+    label: "Test Data Management",
+    accent: "#F97316",
+    icon: FolderSync,
+    available: false,
+  },
+  {
+    id: "qa_maturity",
+    label: "QA Maturity",
+    accent: "#22C55E",
+    icon: ClipboardCheck,
+    available: false,
+  },
+  {
+    id: "eng_analytics",
+    label: "Engineering Analytics",
+    accent: "#EAB308",
+    icon: BarChart3,
+    available: false,
+  },
+  {
+    id: "cicd_insights",
+    label: "CI/CD Insights",
+    accent: "#EC4899",
+    icon: GitBranch,
+    available: false,
   },
 ] as const;
 
