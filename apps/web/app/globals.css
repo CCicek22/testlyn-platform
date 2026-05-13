@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* ── Font face declarations ───────────────────────────────────────────── */
+
+/* Inter — UI font (via Google Fonts CDN in layout.tsx) */
+/* JetBrains Mono — code / metrics (via Google Fonts CDN in layout.tsx) */
+
+/* Cal Sans — marketing hero (self-hosted via next/font/local or CDN) */
+/* Fallback: Inter with tracking-tight + font-bold if Cal Sans not loaded */
+
+/* ── Tailwind v4 CSS theme (mirrors tailwind.config.ts tokens) ─────────── */
+@theme {
+  --color-primary: #3730a3;
+  --color-primary-50: #eceefb;
+  --color-primary-100: #d0d2f6;
+  --color-primary-500: #3730a3;
+  --color-primary-600: #2c2880;
+  --color-primary-700: #211f60;
+
+  --color-success: #10b981;
+  --color-warn: #f59e0b;
+  --color-alert: #ef4444;
+
+  --color-dark: #0a0a0b;
+  --color-light: #fafafa;
+
+  --color-accent-load: #3730a3;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Cal Sans", "Inter", system-ui, sans-serif;
+}
+
+/* ── Base resets ──────────────────────────────────────────────────────── */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply font-sans antialiased;
+}
+
+/* ── Dark mode surface ────────────────────────────────────────────────── */
+
+.dark body {
+  background-color: var(--color-dark);
+  color: #f4f4f5;
+}
+
+/* ── Scrollbar (minimal, dashboard dark) ──────────────────────────────── */
+
+.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+
+/* ── Code / metrics ───────────────────────────────────────────────────── */
+code,
+pre,
+.font-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "liga" 1, "calt" 1;
+}
