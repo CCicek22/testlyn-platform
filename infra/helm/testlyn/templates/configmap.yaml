@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: testlyn-env
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+data:
+  GCP_PROJECT_ID: {{ .Values.global.gcpProject | quote }}
+  GCP_REGION: {{ .Values.global.gcpRegion | quote }}
+  GCP_BQ_DATASET: "testlyn_metrics"
+  GCS_SCRIPTS_BUCKET: "testlyn-prod-scripts"
+  GCS_RESULTS_BUCKET: "testlyn-prod-results"
+  GCS_REPORTS_BUCKET: "testlyn-prod-reports"
+  GCS_LOGS_BUCKET: "testlyn-prod-logs"
+  GCS_SPOOL_BUCKET: "testlyn-prod-spool"
+  CLOUD_TASKS_QUEUE: "testlyn-tasks"
+  FIREBASE_PROJECT_ID: {{ .Values.global.gcpProject | quote }}
+  WEB_BASE_URL: {{ printf "https://%s" .Values.ingress.hosts.web | quote }}
+  API_BASE_URL: {{ printf "https://%s" .Values.ingress.hosts.api | quote }}
+  K6_IMAGE_TAG: "grafana/k6:0.57.0"
+  RUN_MODE: "k8s"

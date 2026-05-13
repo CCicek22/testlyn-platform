@@ -1,0 +1,17 @@
+apiVersion: v2
+name: testlyn
+description: Testlyn AI Test Platform — GKE Autopilot chart (EKS/AKS/OpenShift compatible)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - testlyn
+  - load-testing
+  - ai-testing
+home: https://testlyn.io
+maintainers:
+  - name: Testlyn
+    email: hello@example.com
+annotations:
+  app: testlyn
+  phase: "4"

@@ -28,6 +28,7 @@ from testlyn_api.routers import (
     webhooks,
     webhooks_admin,
 )
+from testlyn_api.routers.graphql import graphql_router
 
 structlog.configure(
     processors=[
@@ -83,6 +84,7 @@ app.include_router(synthetic_data_router)
 app.include_router(api_contract_router)
 app.include_router(security_router)
 app.include_router(insights.router)
+app.include_router(graphql_router)
 
 
 @app.get("/healthz", include_in_schema=False)

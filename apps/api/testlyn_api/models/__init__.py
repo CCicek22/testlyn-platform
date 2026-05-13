@@ -13,6 +13,8 @@ from testlyn_api.models.test import Test
 from testlyn_api.models.test_run import TestRun
 from testlyn_api.models.usage import UsageRecord
 from testlyn_api.models.user import User
+from testlyn_api.models.plugin import Plugin
+from testlyn_api.models.scenario import Scenario
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
 
 __all__ = [
@@ -30,6 +32,8 @@ __all__ = [
     "TestRun",
     "UsageRecord",
     "User",
+    "Plugin",
+    "Scenario",
     "WebhookDelivery",
     "WebhookEndpoint",
 ]

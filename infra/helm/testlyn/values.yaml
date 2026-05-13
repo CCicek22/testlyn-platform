@@ -1,0 +1,173 @@
+# Testlyn Helm chart values
+# Override with -f values-prod.yaml or --set key=value
+
+# -- License key (required for enterprise air-gapped installs)
+licenseKey: ""
+
+# -- Image registry override for air-gapped deployments.
+# e.g. "registry.corp.example.com/testlyn"
+imageRegistry: "us-central1-docker.pkg.dev/example-project-prod/testlyn"
+
+global:
+  # -- One of: dev | staging | prod
+  env: prod
+  # -- GCP project ID
+  gcpProject: example-project-prod
+  # -- GCP region
+  gcpRegion: us-central1
+  # -- Kubernetes namespace
+  namespace: testlyn
+
+# -- Workload Identity annotation value.
+# Format: <gcp-project>.svc.id.goog[<k8s-namespace>/<k8s-sa>]
+workloadIdentity:
+  enabled: true
+
+# ---------------------------------------------------------------------------
+# API service
+# ---------------------------------------------------------------------------
+api:
+  image:
+    repository: "testlyn-api"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  serviceAccount:
+    gcpServiceAccount: "testlyn-api@example-project-prod.iam.gserviceaccount.com"
+  service:
+    port: 8080
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  env:
+    RUN_MODE: "k8s"
+    GCP_REGION: "us-central1"
+    SSE_HEARTBEAT_INTERVAL: "15"
+    SSE_MAX_TICKS: "300"
+  # -- Secret Manager secret IDs injected as env vars via external-secrets or init container
+  secrets:
+    DATABASE_URL: "testlyn-db-url"
+    REDIS_URL: "testlyn-redis-url"
+    STRIPE_SECRET_KEY: "testlyn-stripe-secret"
+    STRIPE_WEBHOOK_SECRET: "testlyn-stripe-webhook-secret"
+    SENDGRID_API_KEY: "testlyn-sendgrid-key"
+
+# ---------------------------------------------------------------------------
+# Web (Next.js) service
+# ---------------------------------------------------------------------------
+web:
+  image:
+    repository: "testlyn-web"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  serviceAccount:
+    gcpServiceAccount: "testlyn-web@example-project-prod.iam.gserviceaccount.com"
+  service:
+    port: 3000
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  env:
+    NODE_ENV: "production"
+
+# ---------------------------------------------------------------------------
+# Engine (k6 + sidecar) — run as Kubernetes Job template
+# ---------------------------------------------------------------------------
+engine:
+  image:
+    repository: "testlyn-engine"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  # Engine runs as Jobs — no persistent Deployment
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+  serviceAccount:
+    gcpServiceAccount: "testlyn-runner@example-project-prod.iam.gserviceaccount.com"
+  ttlSecondsAfterFinished: 3600
+
+# ---------------------------------------------------------------------------
+# Report builder
+# ---------------------------------------------------------------------------
+reportBuilder:
+  image:
+    repository: "testlyn-report-builder"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  serviceAccount:
+    gcpServiceAccount: "testlyn-report@example-project-prod.iam.gserviceaccount.com"
+  service:
+    port: 8081
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# External vs bundled dependencies
+# Set enabled: false to use external (prod) managed services.
+# ---------------------------------------------------------------------------
+postgres:
+  # For prod: use Cloud SQL private IP via Cloud SQL Auth Proxy or direct private IP
+  bundled: false
+  # If bundled: true, deploys a single-replica postgres pod (dev/CI only)
+  image: "postgres:16-alpine"
+  storageSize: "10Gi"
+  # External connection string comes from secret manager (DATABASE_URL)
+
+redis:
+  bundled: false
+  # If bundled: true, deploys single-replica redis pod (dev/CI only)
+  image: "redis:7-alpine"
+  storageSize: "2Gi"
+
+bqEmulator:
+  # Only enable for dev/CI — prod uses real BigQuery
+  enabled: false
+  image: "ghcr.io/goccy/bigquery-emulator:latest"
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: "gce"
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: "testlyn-ip"
+    networking.gke.io/managed-certificates: "testlyn-cert"
+  hosts:
+    api: "api.testlyn.io"
+    web: "app.testlyn.io"
+  tls: true
