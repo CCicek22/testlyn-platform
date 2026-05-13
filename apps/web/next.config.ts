@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   transpilePackages: ["@testlyn/shared", "@testlyn/ui"],
   typescript: {
     // tsc --noEmit handles this; next build also checks
