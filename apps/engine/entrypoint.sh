@@ -60,10 +60,14 @@ cleanup() {
     # Export for sidecar to read when writing runs_summary
     export K6_EXIT_CODE="${K6_EXIT}"
 
-    # Wait for sidecar to drain (give it up to 30 s per spec §8)
+    # Wait for sidecar to drain — 30 s hard cap per spec §8.
+    # timeout(1) sends SIGTERM; on expiry we escalate to SIGKILL.
     if [ -n "${SIDECAR_PID}" ] && kill -0 "${SIDECAR_PID}" 2>/dev/null; then
-        echo "[entrypoint] waiting for sidecar PID ${SIDECAR_PID} to drain..."
-        wait "${SIDECAR_PID}" || true
+        echo "[entrypoint] waiting for sidecar PID ${SIDECAR_PID} to drain (max 30s)..."
+        if ! timeout 30 wait "${SIDECAR_PID}" 2>/dev/null; then
+            echo "[entrypoint] sidecar did not drain within 30s — killing" >&2
+            kill -9 "${SIDECAR_PID}" 2>/dev/null || true
+        fi
     fi
 
     # Upload summary if it exists
