@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Testlyn · Load Test Report · {{ run_id }}</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Fonts — embedded via Google Fonts CSS (WeasyPrint fetches at render) */
+    /* ------------------------------------------------------------------ */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    /* ------------------------------------------------------------------ */
+    /* Reset + base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 13px;
+      color: #111827;
+      background: #FAFAFA;
+    }
+
+    body {
+      padding: 0;
+      margin: 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Page layout for WeasyPrint                                           */
+    /* ------------------------------------------------------------------ */
+    @page {
+      size: A4;
+      margin: 16mm 14mm 20mm 14mm;
+
+      @top-left {
+        content: "Testlyn · Load Test Report";
+        font-family: 'Inter', sans-serif;
+        font-size: 9px;
+        color: #6B7280;
+      }
+      @top-right {
+        content: "{{ run_id }}";
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        color: #6B7280;
+      }
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: 'Inter', sans-serif;
+        font-size: 9px;
+        color: #9CA3AF;
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    .header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      border-bottom: 3px solid #3730A3;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+
+    .header-logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #3730A3;
+      letter-spacing: -0.5px;
+    }
+
+    .header-logo span {
+      color: #111827;
+    }
+
+    .header-meta {
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: #6B7280;
+      line-height: 1.6;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Section titles                                                        */
+    /* ------------------------------------------------------------------ */
+    h2 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #3730A3;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 20px 0 8px 0;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #E5E7EB;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Summary metrics table                                                */
+    /* ------------------------------------------------------------------ */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .metric-card {
+      background: #F3F4F6;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 18px;
+      font-weight: 600;
+      color: #111827;
+    }
+
+    .metric-unit {
+      font-size: 10px;
+      color: #9CA3AF;
+      margin-left: 2px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Charts                                                               */
+    /* ------------------------------------------------------------------ */
+    .chart-wrapper {
+      margin-bottom: 16px;
+      page-break-inside: avoid;
+    }
+
+    .chart-wrapper img {
+      width: 100%;
+      border-radius: 6px;
+      border: 1px solid #E5E7EB;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* AI summary                                                           */
+    /* ------------------------------------------------------------------ */
+    .ai-summary {
+      background: #EEF2FF;
+      border-left: 4px solid #3730A3;
+      border-radius: 0 6px 6px 0;
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.65;
+      color: #1E1B4B;
+      margin-bottom: 16px;
+      page-break-inside: avoid;
+    }
+
+    .ai-label {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #3730A3;
+      margin-bottom: 6px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Metadata table                                                       */
+    /* ------------------------------------------------------------------ */
+    .meta-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-bottom: 20px;
+    }
+
+    .meta-table th {
+      text-align: left;
+      font-weight: 600;
+      color: #374151;
+      padding: 5px 8px;
+      background: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      width: 30%;
+    }
+
+    .meta-table td {
+      padding: 5px 8px;
+      border: 1px solid #E5E7EB;
+      font-family: 'JetBrains Mono', monospace;
+      color: #1F2937;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer strip                                                         */
+    /* ------------------------------------------------------------------ */
+    .footer-strip {
+      margin-top: 24px;
+      padding-top: 8px;
+      border-top: 1px solid #E5E7EB;
+      font-size: 9px;
+      color: #9CA3AF;
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-logo">test<span>lyn</span></div>
+    <div class="header-meta">
+      <div>Load Test Report</div>
+      <div>{{ run_id }}</div>
+      <div>Org: {{ org_id }}</div>
+    </div>
+  </div>
+
+  <!-- Run metadata -->
+  <h2>Run metadata</h2>
+  <table class="meta-table">
+    <tr>
+      <th>Run ID</th>
+      <td>{{ run_id }}</td>
+    </tr>
+    <tr>
+      <th>Organisation</th>
+      <td>{{ org_id }}</td>
+    </tr>
+    <tr>
+      <th>Product</th>
+      <td>load</td>
+    </tr>
+    {% if summary.get('started_at') %}
+    <tr>
+      <th>Started</th>
+      <td>{{ summary.started_at }}</td>
+    </tr>
+    {% endif %}
+    {% if summary.get('finished_at') %}
+    <tr>
+      <th>Finished</th>
+      <td>{{ summary.finished_at }}</td>
+    </tr>
+    {% endif %}
+    {% if summary.get('status') %}
+    <tr>
+      <th>Status</th>
+      <td>{{ summary.status }}</td>
+    </tr>
+    {% endif %}
+  </table>
+
+  <!-- Key metrics -->
+  <h2>Key metrics</h2>
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-label">Total requests</div>
+      <div class="metric-value">{{ summary.get('http_reqs', '—') }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Failed requests</div>
+      <div class="metric-value">{{ summary.get('http_failed', '—') }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Peak VUs</div>
+      <div class="metric-value">{{ summary.get('vus_max', '—') }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Median latency</div>
+      <div class="metric-value">{{ summary.get('p50_ms', '—') }}<span class="metric-unit">ms</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">p95 latency</div>
+      <div class="metric-value">{{ summary.get('p95_ms', '—') }}<span class="metric-unit">ms</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">p99 latency</div>
+      <div class="metric-value">{{ summary.get('p99_ms', '—') }}<span class="metric-unit">ms</span></div>
+    </div>
+  </div>
+
+  <!-- AI summary -->
+  <h2>AI analysis</h2>
+  <div class="ai-summary">
+    <div class="ai-label">Gemini 3.1 Flash-Lite · Vertex AI</div>
+    {{ ai_summary | e }}
+  </div>
+
+  <!-- Charts -->
+  <h2>Latency over time</h2>
+  <div class="chart-wrapper">
+    <img src="data:image/png;base64,{{ chart_latency }}" alt="Latency chart (p50/p95/p99)" />
+  </div>
+
+  <h2>Error rate</h2>
+  <div class="chart-wrapper">
+    <img src="data:image/png;base64,{{ chart_error }}" alt="Error rate chart" />
+  </div>
+
+  <h2>Virtual users</h2>
+  <div class="chart-wrapper">
+    <img src="data:image/png;base64,{{ chart_vus }}" alt="VU count chart" />
+  </div>
+
+  <!-- Footer strip -->
+  <div class="footer-strip">
+    <span>Generated by Testlyn · testlyn.io</span>
+    <span>Run {{ run_id }}</span>
+  </div>
+
+</body>
+</html>

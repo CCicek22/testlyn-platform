@@ -9,6 +9,10 @@ dependencies = [
     "structlog>=24.4",
     "google-cloud-storage>=2.18",
     "google-cloud-bigquery>=3.27",
+    "weasyprint>=63",
+    "matplotlib>=3.9",
+    "jinja2>=3.1",
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
