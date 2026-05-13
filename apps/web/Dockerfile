@@ -21,7 +21,6 @@ RUN pnpm install --frozen-lockfile
 FROM base AS builder
 RUN corepack enable
 COPY --from=deps /repo/node_modules ./node_modules
-COPY --from=deps /repo/packages/*/node_modules ./packages_node_modules_placeholder 2>/dev/null || true
 COPY . .
 RUN pnpm --filter=@testlyn/web build
 
