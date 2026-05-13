@@ -6,14 +6,19 @@ locals {
     managed-by = "terraform"
   }
 
-  versioned_buckets = toset(["testlyn-prod-scripts", "testlyn-prod-results"])
+  # R6-C1: bucket names carry the env suffix so dev and prod don't share buckets.
+  # var.env must be "dev" or "prod" — set in each envs/<env>/terraform.tfvars.
+  versioned_buckets = toset([
+    "testlyn-${var.env}-scripts",
+    "testlyn-${var.env}-results",
+  ])
 
   all_buckets = toset([
-    "testlyn-prod-scripts",
-    "testlyn-prod-results",
-    "testlyn-prod-reports",
-    "testlyn-prod-logs",
-    "testlyn-prod-spool",
+    "testlyn-${var.env}-scripts",
+    "testlyn-${var.env}-results",
+    "testlyn-${var.env}-reports",
+    "testlyn-${var.env}-logs",
+    "testlyn-${var.env}-spool",
   ])
 }
 
@@ -29,7 +34,7 @@ resource "google_storage_bucket" "buckets" {
   labels = local.common_labels
 
   versioning {
-    enabled = contains(tolist(local.versioned_buckets), each.value)
+    enabled = contains(tolist(local.versioned_buckets), each.key)
   }
 
   lifecycle_rule {

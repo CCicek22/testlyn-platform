@@ -48,8 +48,9 @@ RUN uv pip install --system \
 # Copy sidecar source from apps/engine/sidecar (build context = repo root)
 COPY apps/engine/sidecar/ ./sidecar/
 
-# Copy the Playwright-specific parser plugin
-COPY apps/engine-playwright/parser/ ./sidecar/parsers/
+# Copy the Playwright-specific parser plugin into its own subdirectory so it
+# does NOT overwrite base.py or k6.py that were just copied from the sidecar.
+COPY apps/engine-playwright/parser/ ./sidecar/parsers/playwright/
 
 # Copy entrypoint
 COPY apps/engine-playwright/entrypoint.sh /entrypoint.sh

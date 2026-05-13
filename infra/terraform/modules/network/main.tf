@@ -1,3 +1,13 @@
+locals {
+  # R6-C5: labels required on all taggable network resources
+  common_labels = {
+    app        = "testlyn"
+    phase      = "1"
+    env        = var.env
+    managed-by = "terraform"
+  }
+}
+
 resource "google_compute_network" "vpc" {
   project                 = var.project_id
   name                    = "testlyn-vpc"
@@ -15,6 +25,7 @@ resource "google_compute_subnetwork" "subnet" {
 }
 
 resource "google_compute_global_address" "private_ip_range" {
+  # google_compute_global_address does not support labels
   project       = var.project_id
   name          = "testlyn-private-ip-range"
   purpose       = "VPC_PEERING"
@@ -24,6 +35,7 @@ resource "google_compute_global_address" "private_ip_range" {
 }
 
 resource "google_service_networking_connection" "private_vpc_connection" {
+  # google_service_networking_connection does not support labels
   network                 = google_compute_network.vpc.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_range.name]
@@ -37,4 +49,6 @@ resource "google_vpc_access_connector" "connector" {
   ip_cidr_range  = var.connector_cidr
   min_throughput = 200
   max_throughput = 1000
+
+  labels = local.common_labels
 }

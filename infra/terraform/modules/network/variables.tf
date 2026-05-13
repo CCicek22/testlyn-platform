@@ -9,6 +9,12 @@ variable "region" {
   default     = "us-central1"
 }
 
+# R6-C5: required for common_labels on taggable resources
+variable "env" {
+  description = "Environment (dev or prod)"
+  type        = string
+}
+
 variable "subnet_cidr" {
   description = "CIDR range for the subnet"
   type        = string

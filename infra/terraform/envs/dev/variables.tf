@@ -53,6 +53,18 @@ variable "engine_image" {
   default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/engine:latest"
 }
 
+variable "engine_playwright_image" {
+  description = "Container image for the engine-playwright job (Phase 2)"
+  type        = string
+  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/engine-playwright:latest"
+}
+
+variable "engine_a11y_image" {
+  description = "Container image for the engine-a11y job (Phase 2)"
+  type        = string
+  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/engine-a11y:latest"
+}
+
 variable "billing_account_id" {
   description = "GCP billing account ID (XXXXXX-XXXXXX-XXXXXX format)"
   type        = string

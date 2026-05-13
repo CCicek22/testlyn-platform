@@ -51,7 +51,8 @@ resource "google_billing_budget" "testlyn" {
 
 resource "google_pubsub_topic" "budget_alerts" {
   project = var.project_id
-  name    = "testlyn-budget-alerts"
+  # R6-C6: include env suffix so dev and prod don't collide on the same topic name
+  name    = "testlyn-budget-alerts-${var.env}"
 
   labels = local.common_labels
 }
