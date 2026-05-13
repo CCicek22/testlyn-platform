@@ -506,6 +506,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cross-web"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ad/83/b5ef04565acc065387dda3a4fbf0c4cfb6bab805c81b66b2bc5b5ac9a282/cross_web-0.6.0.tar.gz", hash = "sha256:ae90570802615365ca1a781117b43bfd0d6cd3bf611649d24c3a206a82a693c9", size = 331315, upload-time = "2026-04-13T14:29:12.718Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/a2/dab06d9b80cb76c700883186a9a2e6fd103342c9b4def4d88f5787796e17/cross_web-0.6.0-py3-none-any.whl", hash = "sha256:bdebf0c08d02f3a48cf67b6904d3a6d8fd8cab2cd905592ab96ab00b259cd582", size = 24820, upload-time = "2026-04-13T14:29:11.198Z" },
+]
+
+[[package]]
 name = "cryptography"
 version = "48.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1040,6 +1052,15 @@ wheels = [
 [package.optional-dependencies]
 grpc = [
     { name = "grpcio" },
+]
+
+[[package]]
+name = "graphql-core"
+version = "3.2.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/c5/36aa96205c3ecbb3d34c7c24189e4553c7ca2ebc7e1dd07432339b980272/graphql_core-3.2.8.tar.gz", hash = "sha256:015457da5d996c924ddf57a43f4e959b0b94fb695b85ed4c29446e508ed65cf3", size = 513181, upload-time = "2026-03-05T19:55:37.332Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/41/cb887d9afc5dabd78feefe6ccbaf83ff423c206a7a1b7aeeac05120b2125/graphql_core-3.2.8-py3-none-any.whl", hash = "sha256:cbee07bee1b3ed5e531723685369039f32ff815ef60166686e0162f540f1520c", size = 207349, upload-time = "2026-03-05T19:55:35.911Z" },
 ]
 
 [[package]]
@@ -2293,6 +2314,28 @@ wheels = [
 ]
 
 [[package]]
+name = "strawberry-graphql"
+version = "0.315.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cross-web" },
+    { name = "graphql-core" },
+    { name = "packaging" },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/30/3560e3f84434fd3dfbf24ce6ae009b48d96692d205077d29b633eda1331d/strawberry_graphql-0.315.4.tar.gz", hash = "sha256:0f8ebeda3ab635c9d59b344e6f98aaddd69ce855d6c1ff4bc0e3c1ccab557697", size = 222682, upload-time = "2026-05-12T18:35:34.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/07/045c3c8e75bf48e3eec78091bee6ad0f03fcad1faf79ee2bfac471ccefdf/strawberry_graphql-0.315.4-py3-none-any.whl", hash = "sha256:d667cdc13791a03f880d689b28fca0205bfd38928ae98a07c24bf58304d077a6", size = 325061, upload-time = "2026-05-12T18:35:37.304Z" },
+]
+
+[package.optional-dependencies]
+fastapi = [
+    { name = "fastapi" },
+    { name = "python-multipart" },
+]
+
+[[package]]
 name = "stripe"
 version = "15.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2346,6 +2389,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "strawberry-graphql", extra = ["fastapi"] },
     { name = "stripe" },
     { name = "structlog" },
     { name = "uvicorn", extra = ["standard"] },
@@ -2395,6 +2439,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+    { name = "strawberry-graphql", extras = ["fastapi"], specifier = ">=0.243.0" },
     { name = "stripe", specifier = ">=10.0.0" },
     { name = "structlog", specifier = ">=25.3.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.44.0" },
