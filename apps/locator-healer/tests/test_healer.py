@@ -9,19 +9,18 @@ Tests:
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+# Ensure tests don't try to call Redis or enable Gemini
+import os
+
+os.environ.setdefault("REDIS_URL", "")
+os.environ.setdefault("LOCATOR_HEALING_ENABLED", "0")
+
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-# Ensure tests don't try to call Redis
-import os
-os.environ.setdefault("REDIS_URL", "")
-os.environ.setdefault("LOCATOR_HEALING_ENABLED", "0")
-
 from main import HealRequest, _cache_key, _heuristic_heal, _mem_cache, app
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -132,9 +131,15 @@ class TestHealEndpoint:
         import google.auth.exceptions
 
         with (
-            patch("os.getenv", side_effect=lambda k, d="": "1" if k == "LOCATOR_HEALING_ENABLED" else d),
+            patch(
+                "os.getenv",
+                side_effect=lambda k, d="": "1" if k == "LOCATOR_HEALING_ENABLED" else d,
+            ),
             patch("main.LOCATOR_HEALING_ENABLED", True),
-            patch("google.auth.default", side_effect=google.auth.exceptions.DefaultCredentialsError()),
+            patch(
+                "google.auth.default",
+                side_effect=google.auth.exceptions.DefaultCredentialsError(),
+            ),
         ):
             resp = await client.post("/heal", json=body)
 

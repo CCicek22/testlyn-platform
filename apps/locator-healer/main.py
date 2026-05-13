@@ -19,7 +19,7 @@ from typing import Any
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI
 from pydantic import BaseModel
 
 log = structlog.get_logger(__name__)
@@ -36,6 +36,24 @@ _CACHE_TTL = 86_400  # 24h
 
 # In-memory fallback when Redis is unavailable
 _mem_cache: dict[str, dict[str, Any]] = {}
+
+# Module-level Redis client — lazy-initialised on first use, never closed.
+# Avoids opening a new TCP connection on every /heal request.
+_redis: Any | None = None
+
+
+def _get_redis() -> Any:
+    """Return the module-level Redis client, creating it on first call."""
+    global _redis
+    if _redis is None and REDIS_URL:
+        try:
+            import redis.asyncio as aioredis
+
+            _redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+        except Exception as exc:
+            log.warning("healer.redis_init_error", error=str(exc))
+    return _redis
+
 
 app = FastAPI(title="Testlyn Locator Healer", version="0.1.0")
 
@@ -77,13 +95,10 @@ def _cache_key(req: HealRequest) -> str:
 
 
 async def _cache_get(key: str) -> dict[str, Any] | None:
-    if REDIS_URL:
+    client = _get_redis()
+    if client is not None:
         try:
-            import redis.asyncio as aioredis
-
-            client = aioredis.from_url(REDIS_URL, decode_responses=True)
             raw = await client.get(key)
-            await client.aclose()
             if raw:
                 return json.loads(raw)
         except Exception as exc:
@@ -93,13 +108,10 @@ async def _cache_get(key: str) -> dict[str, Any] | None:
 
 
 async def _cache_set(key: str, value: dict[str, Any]) -> None:
-    if REDIS_URL:
+    client = _get_redis()
+    if client is not None:
         try:
-            import redis.asyncio as aioredis
-
-            client = aioredis.from_url(REDIS_URL, decode_responses=True)
             await client.set(key, json.dumps(value), ex=_CACHE_TTL)
-            await client.aclose()
             return
         except Exception as exc:
             log.warning("healer.cache_redis_write_error", error=str(exc))
