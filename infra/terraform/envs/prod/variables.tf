@@ -50,12 +50,12 @@ variable "engine_image" {
 }
 
 variable "engine_playwright_image" {
-  description = "Container image for the engine-playwright job (Phase 2)"
+  description = "Container image for the Playwright engine job (Phase 2)"
   type        = string
 }
 
 variable "engine_a11y_image" {
-  description = "Container image for the engine-a11y job (Phase 2)"
+  description = "Container image for the a11y engine job (Phase 2)"
   type        = string
 }
 

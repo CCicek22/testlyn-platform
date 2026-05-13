@@ -6,12 +6,7 @@ locals {
     managed-by = "terraform"
   }
 
-  # R6-C1: bucket names carry the env suffix so dev and prod don't share buckets.
-  # var.env must be "dev" or "prod" — set in each envs/<env>/terraform.tfvars.
-  versioned_buckets = toset([
-    "testlyn-${var.env}-scripts",
-    "testlyn-${var.env}-results",
-  ])
+  versioned_buckets = toset(["testlyn-${var.env}-scripts", "testlyn-${var.env}-results"])
 
   all_buckets = toset([
     "testlyn-${var.env}-scripts",

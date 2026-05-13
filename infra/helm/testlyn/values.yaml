@@ -98,13 +98,13 @@ engine:
     tag: "latest"
     pullPolicy: IfNotPresent
   # Engine runs as Jobs — no persistent Deployment
-  # R6-C7: align with Terraform Cloud Run Job sizing (16Gi limit, 8Gi request)
+  # R6-C7: align with Terraform Cloud Run Job sizing (4cpu/16Gi limit, 8Gi request)
   resources:
     requests:
       cpu: "500m"
       memory: "8Gi"
     limits:
-      cpu: "2000m"
+      cpu: "4000m"
       memory: "16Gi"
   serviceAccount:
     gcpServiceAccount: "testlyn-runner@example-project-prod.iam.gserviceaccount.com"
