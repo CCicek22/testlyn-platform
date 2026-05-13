@@ -212,7 +212,10 @@ class BQWriter:
 
     async def _drain_spool(self) -> None:
         total = 0
-        async for batch in self._spool.drain():
+        async for kind, batch in self._spool.drain():
+            # Route to the correct BQ table based on the kind discriminator.
+            # Phase 1 only ever spools samples_1s rows; assert to catch drift.
+            assert kind == "samples_1s", f"Unexpected spool kind: {kind!r}"
             await self._insert_with_retry(batch, table_id=self._cfg.samples_table_id)
             total += len(batch)
         if total:

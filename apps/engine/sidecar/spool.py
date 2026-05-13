@@ -48,8 +48,19 @@ class Spool:
                 pass
         return total
 
-    async def write(self, rows: list[dict], *, poison: bool = False) -> None:  # type: ignore[type-arg]
-        """Persist a batch to the spool. `poison=True` → write to poison/."""
+    async def write(
+        self,
+        rows: list[dict],  # type: ignore[type-arg]
+        *,
+        poison: bool = False,
+        kind: str = "samples_1s",
+    ) -> None:
+        """Persist a batch to the spool. `poison=True` → write to poison/.
+
+        `kind` is a discriminator written into every spool file's header line
+        so `_drain_spool` can route replayed batches to the correct BQ table.
+        Phase 1 only uses "samples_1s"; future phases may add "runs_summary".
+        """
         self._ensure_dirs()
 
         current_size = self._spool_size_bytes()
@@ -67,6 +78,9 @@ class Spool:
         filename = target_dir / f"{int(time.time() * 1000)}_{seq:06d}.jsonl"
 
         async with aiofiles.open(filename, "w") as fh:
+            # First line is a header record with the kind discriminator.
+            # Readers MUST check _header["_kind"] before routing to a BQ table.
+            await fh.write(json.dumps({"_kind": kind}) + "\n")
             for row in rows:
                 await fh.write(json.dumps(row) + "\n")
 
@@ -77,11 +91,14 @@ class Spool:
             poison=poison,
         )
 
-    async def drain(self) -> AsyncIterator[list[dict]]:  # type: ignore[type-arg]
-        """Yield batches from leftover spool files (non-poison only).
+    async def drain(self) -> AsyncIterator[tuple[str, list[dict]]]:  # type: ignore[type-arg]
+        """Yield (kind, rows) tuples from leftover spool files (non-poison only).
 
-        Each yielded batch should be re-sent to BQ. After yielding, the
-        caller is responsible for deleting the file on success (via `mark_done`).
+        `kind` is the BQ table discriminator written by `write()` into the
+        first header line of each spool file.  Callers must route to the
+        correct table based on `kind`.
+
+        The file is deleted after each successful yield (caller must not raise).
         """
         self._ensure_dirs()
         spool_files = sorted(self._dir.glob("*.jsonl"))
@@ -91,18 +108,31 @@ class Spool:
         log.info("spool.drain_start", file_count=len(spool_files))
         for path in spool_files:
             try:
-                rows = []
+                kind = "samples_1s"  # default for files written before R1-C2
+                rows: list[dict] = []  # type: ignore[type-arg]
                 async with aiofiles.open(path) as fh:
+                    first = True
                     async for line in fh:
                         line = line.strip()
-                        if line:
-                            rows.append(json.loads(line))
+                        if not line:
+                            continue
+                        parsed = json.loads(line)
+                        if first:
+                            first = False
+                            if "_kind" in parsed:
+                                kind = parsed["_kind"]
+                                assert kind == "samples_1s", (
+                                    f"Unknown spool kind '{kind}' in {path} — "
+                                    "only 'samples_1s' is supported in Phase 1"
+                                )
+                                continue  # header consumed; don't add to rows
+                        rows.append(parsed)
                 if rows:
-                    yield rows
-                    # Caller signals success by deleting; we remove it here
-                    # after yield returns without exception
+                    yield kind, rows
+                    # File is removed after successful yield; caller must not raise
+                    # between yield and the next iteration.
                     path.unlink(missing_ok=True)
-                    log.info("sidecar.spool_drained", path=str(path), rows=len(rows))
+                    log.info("sidecar.spool_drained", path=str(path), rows=len(rows), kind=kind)
             except Exception as exc:
                 log.error("spool.drain_error", path=str(path), error=str(exc))
 

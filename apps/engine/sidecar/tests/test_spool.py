@@ -15,9 +15,11 @@ async def test_write_and_drain(tmp_path: Path) -> None:
     rows = [{"run_id": "r1", "metric": "m", "count": i} for i in range(5)]
     await spool.write(rows)
 
-    batches = [b async for b in spool.drain()]
+    batches = [(kind, rows) async for kind, rows in spool.drain()]
     assert len(batches) == 1
-    assert len(batches[0]) == 5
+    kind, rows = batches[0]
+    assert kind == "samples_1s"
+    assert len(rows) == 5
     # File should be deleted after drain
     assert list(Path(str(tmp_path)).glob("*.jsonl")) == []  # noqa: ASYNC240
 
@@ -28,17 +30,17 @@ async def test_multiple_writes_multiple_drains(tmp_path: Path) -> None:
     await spool.write([{"n": 1}])
     await spool.write([{"n": 2}])
 
-    batches = [b async for b in spool.drain()]
+    batches = [(kind, rows) async for kind, rows in spool.drain()]
     # Two spool files → two batches (ordered by timestamp prefix)
     assert len(batches) == 2
-    ns = {b[0]["n"] for b in batches}
+    ns = {rows[0]["n"] for _kind, rows in batches}
     assert ns == {1, 2}
 
 
 @pytest.mark.asyncio
 async def test_drain_empty_spool(tmp_path: Path) -> None:
     spool = Spool(str(tmp_path))
-    batches = [b async for b in spool.drain()]
+    batches = [(kind, rows) async for kind, rows in spool.drain()]
     assert batches == []
 
 
@@ -47,7 +49,7 @@ async def test_poison_write_does_not_appear_in_drain(tmp_path: Path) -> None:
     spool = Spool(str(tmp_path))
     await spool.write([{"poisoned": True}], poison=True)
 
-    batches = [b async for b in spool.drain()]
+    batches = [(kind, rows) async for kind, rows in spool.drain()]
     assert batches == []  # drain ignores poison/
 
     # But poison dir should have the file
@@ -69,10 +71,11 @@ async def test_cap_drops_batch_when_full(tmp_path: Path) -> None:
     # Now spool has data > 1 byte; next write should drop
     await capped_spool.write([{"y": 2}])
 
-    batches = [b async for b in Spool(str(tmp_path)).drain()]
+    batches = [(kind, rows) async for kind, rows in Spool(str(tmp_path)).drain()]
     # Only the first batch should be there
     assert len(batches) == 1
-    assert batches[0][0].get("x") == 1
+    _kind, rows = batches[0]
+    assert rows[0].get("x") == 1
 
 
 @pytest.mark.asyncio
