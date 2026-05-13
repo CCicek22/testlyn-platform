@@ -1,0 +1,52 @@
+# Engine Job Template — instantiated per test run by the API via Cloud Tasks / k8s Jobs API.
+# This file is a template reference; the API creates Job manifests from this spec at runtime.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: testlyn-engine-example
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: engine
+  annotations:
+    # At runtime the API sets: testlyn/run-id, testlyn/test-id, testlyn/org-id
+    testlyn/run-id: "PLACEHOLDER"
+spec:
+  ttlSecondsAfterFinished: {{ .Values.engine.ttlSecondsAfterFinished }}
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: testlyn-engine
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: testlyn
+        component: engine
+    spec:
+      serviceAccountName: testlyn-engine
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: engine
+          image: "{{ .Values.imageRegistry }}/{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag }}"
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.engine.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: testlyn-env
+            - secretRef:
+                name: testlyn-secrets
+          env:
+            - name: RUN_ID
+              value: "PLACEHOLDER"
+            - name: TEST_ID
+              value: "PLACEHOLDER"
+            - name: SCRIPT_URI
+              value: "PLACEHOLDER"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

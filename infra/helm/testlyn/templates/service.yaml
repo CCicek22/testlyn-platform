@@ -1,0 +1,57 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: testlyn-api
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: testlyn-api
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: testlyn-web
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: web
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: testlyn-web
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.web.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: testlyn-report-builder
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: report-builder
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: testlyn-report-builder
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.reportBuilder.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http

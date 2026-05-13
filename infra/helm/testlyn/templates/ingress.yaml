@@ -1,0 +1,50 @@
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: testlyn-api
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: api
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.hosts.api }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: testlyn-api
+                port:
+                  number: {{ .Values.api.service.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: testlyn-web
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: web
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.hosts.web }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: testlyn-web
+                port:
+                  number: {{ .Values.web.service.port }}
+{{- end }}

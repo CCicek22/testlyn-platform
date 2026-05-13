@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: testlyn-report-builder
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "testlyn.labels" . | nindent 4 }}
+    component: report-builder
+spec:
+  replicas: {{ .Values.reportBuilder.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: testlyn-report-builder
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: testlyn-report-builder
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: testlyn
+        component: report-builder
+    spec:
+      serviceAccountName: testlyn-report-builder
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: report-builder
+          image: "{{ .Values.imageRegistry }}/{{ .Values.reportBuilder.image.repository }}:{{ .Values.reportBuilder.image.tag }}"
+          imagePullPolicy: {{ .Values.reportBuilder.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.reportBuilder.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.reportBuilder.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: testlyn-env
+            - secretRef:
+                name: testlyn-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
