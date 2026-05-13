@@ -201,6 +201,13 @@ async def list_deliveries(
         ep = await _get_endpoint_or_404(endpoint_id, session)
         await _assert_org_member(ep.org_id, current_user.id, session)
         stmt = stmt.where(WebhookDelivery.endpoint_id == endpoint_id)
+    else:
+        # Scope to endpoints belonging to orgs the user is a member of
+        member_org_ids_q = select(OrgMember.org_id).where(OrgMember.user_id == current_user.id)
+        user_endpoint_ids_q = select(WebhookEndpoint.id).where(
+            WebhookEndpoint.org_id.in_(member_org_ids_q)
+        )
+        stmt = stmt.where(WebhookDelivery.endpoint_id.in_(user_endpoint_ids_q))
 
     if delivery_status is not None:
         stmt = stmt.where(WebhookDelivery.status == delivery_status)

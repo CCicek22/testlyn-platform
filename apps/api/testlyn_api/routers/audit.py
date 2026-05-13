@@ -150,8 +150,8 @@ async def list_audit_log(
     session: SessionDep,
     action: str | None = Query(default=None),
     actor_id: uuid.UUID | None = Query(default=None),
-    from_dt: datetime | None = Query(default=None, alias="from"),
-    to_dt: datetime | None = Query(default=None, alias="to"),
+    from_dt: datetime | None = Query(default=None, alias="from_dt"),
+    to_dt: datetime | None = Query(default=None, alias="to_dt"),
     cursor: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> AuditLogPage:
@@ -189,8 +189,8 @@ async def export_audit_csv(
     session: SessionDep,
     action: str | None = Query(default=None),
     actor_id: uuid.UUID | None = Query(default=None),
-    from_dt: datetime | None = Query(default=None, alias="from"),
-    to_dt: datetime | None = Query(default=None, alias="to"),
+    from_dt: datetime | None = Query(default=None, alias="from_dt"),
+    to_dt: datetime | None = Query(default=None, alias="to_dt"),
 ) -> StreamingResponse:
     rows = await _fetch_page(
         session,
@@ -241,8 +241,8 @@ async def export_audit_json(
     session: SessionDep,
     action: str | None = Query(default=None),
     actor_id: uuid.UUID | None = Query(default=None),
-    from_dt: datetime | None = Query(default=None, alias="from"),
-    to_dt: datetime | None = Query(default=None, alias="to"),
+    from_dt: datetime | None = Query(default=None, alias="from_dt"),
+    to_dt: datetime | None = Query(default=None, alias="to_dt"),
 ) -> StreamingResponse:
     rows = await _fetch_page(
         session,
