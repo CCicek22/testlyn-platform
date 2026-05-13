@@ -49,6 +49,16 @@ variable "engine_image" {
   type        = string
 }
 
+variable "engine_playwright_image" {
+  description = "Container image for the Playwright engine job (Phase 2)"
+  type        = string
+}
+
+variable "engine_a11y_image" {
+  description = "Container image for the a11y engine job (Phase 2)"
+  type        = string
+}
+
 variable "billing_account_id" {
   description = "GCP billing account ID (XXXXXX-XXXXXX-XXXXXX format)"
   type        = string

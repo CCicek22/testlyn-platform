@@ -60,7 +60,7 @@ IMAGES=(
   "${REGISTRY}/testlyn-report-builder:latest"
   "${REGISTRY}/testlyn-locator-healer:latest"
   # Third-party images pinned in values.yaml
-  "grafana/k6:0.57.0"
+  "grafana/k6:1.3.0"
   "postgres:16-alpine"
   "redis:7-alpine"
 )

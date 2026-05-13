@@ -51,7 +51,7 @@ resource "google_billing_budget" "testlyn" {
 
 resource "google_pubsub_topic" "budget_alerts" {
   project = var.project_id
-  name    = "testlyn-budget-alerts"
+  name    = "testlyn-budget-alerts-${var.env}"
 
   labels = local.common_labels
 }

@@ -34,6 +34,7 @@ module "network" {
   source     = "../../modules/network"
   project_id = var.gcp_project_id
   region     = var.region
+  env        = var.env
 
   depends_on = [module.apis]
 }
@@ -223,6 +224,66 @@ module "cloud_run_job_engine" {
   }
 
   depends_on = [module.bigquery, module.gcs, module.iam, module.network]
+}
+
+# ── Cloud Run Job: Engine Playwright (Phase 2) ────────────────────────────────
+# R6-C3: wire Phase 2 modules so they are tracked in state.
+# These jobs are feature-flagged at the API layer; Terraform still provisions them.
+module "cloud_run_job_playwright" {
+  source     = "../../modules/cloud_run_job_playwright"
+  project_id = var.gcp_project_id
+  region     = var.region
+  env        = var.env
+
+  image                 = var.engine_playwright_image
+  service_account_email = module.iam.runner_sa_email
+  vpc_connector_id      = module.network.connector_id
+
+  env_vars = {
+    GCP_PROJECT    = var.gcp_project_id
+    REGION         = var.region
+    BQ_DATASET     = module.bigquery.dataset_id
+    SCRIPTS_BUCKET = module.gcs.scripts_bucket
+    RESULTS_BUCKET = module.gcs.results_bucket
+    SPOOL_BUCKET   = module.gcs.spool_bucket
+    CALLBACK_URL   = "${module.cloud_run_api.service_url}/v1/internal/runs"
+  }
+
+  depends_on = [module.bigquery, module.gcs, module.iam, module.network]
+}
+
+# ── Cloud Run Job: Engine a11y (Phase 2) ──────────────────────────────────────
+module "cloud_run_job_a11y" {
+  source     = "../../modules/cloud_run_job_a11y"
+  project_id = var.gcp_project_id
+  region     = var.region
+  env        = var.env
+
+  image                 = var.engine_a11y_image
+  service_account_email = module.iam.runner_sa_email
+  vpc_connector_id      = module.network.connector_id
+
+  env_vars = {
+    GCP_PROJECT    = var.gcp_project_id
+    REGION         = var.region
+    BQ_DATASET     = module.bigquery.dataset_id
+    SCRIPTS_BUCKET = module.gcs.scripts_bucket
+    RESULTS_BUCKET = module.gcs.results_bucket
+    SPOOL_BUCKET   = module.gcs.spool_bucket
+    CALLBACK_URL   = "${module.cloud_run_api.service_url}/v1/internal/runs"
+  }
+
+  depends_on = [module.bigquery, module.gcs, module.iam, module.network]
+}
+
+# ── BigQuery a11y (Phase 2) ───────────────────────────────────────────────────
+module "bigquery_a11y" {
+  source     = "../../modules/bigquery_a11y"
+  project_id = var.gcp_project_id
+  env        = var.env
+  dataset_id = module.bigquery.dataset_id
+
+  depends_on = [module.bigquery]
 }
 
 # ── Cloud Scheduler ──────────────────────────────────────────────────────────
