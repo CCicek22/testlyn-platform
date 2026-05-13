@@ -1,0 +1,30 @@
+[tool.uv.workspace]
+members = [
+    "apps/api",
+    "apps/engine",
+    "apps/report-builder",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [".venv", "docs", "infra"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle / pyflakes
+    "I",             # isort
+    "B",             # bugbear
+    "UP",            # pyupgrade
+    "ASYNC",         # async best practices
+    "RUF",
+]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["apps/api/tests", "apps/engine/tests", "apps/report-builder/tests"]
+addopts = "-ra --strict-markers"

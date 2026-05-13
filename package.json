@@ -1,0 +1,20 @@
+{
+  "name": "testlyn",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Testlyn — developer-first AI test platform (Phase 1: Load Testing).",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0"
+  }
+}

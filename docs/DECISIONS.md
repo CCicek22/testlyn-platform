@@ -1,0 +1,72 @@
+# Testlyn — Architecture Decision Records
+
+Append-only. Never delete an ADR — supersede it with a new one.
+
+Format:
+
+```markdown
+## ADR-NNN: <decision title> — YYYY-MM-DD
+**Status:** accepted | superseded by ADR-XXX | rejected
+**Context:** what forced the decision
+**Decision:** what we chose
+**Consequences:** what this commits us to / forecloses
+**Alternatives considered:** what we passed on, briefly
+```
+
+---
+
+## ADR-001: GCP over AWS for all infra — 2026-05-12
+**Status:** accepted
+**Context:** Single-cloud decision needed before Phase 1. Both clouds viable.
+**Decision:** Google Cloud across the stack.
+**Consequences:** Standardize on Cloud Run, Cloud SQL, BigQuery, Identity Platform, Vertex AI. Lock-in is real; mitigated by Terraform abstraction at module boundary.
+**Alternatives considered:** AWS (ECS/RDS/Athena/Cognito), Fly.io + Neon + Clickhouse.
+
+## ADR-002: FastAPI over Spring Boot — 2026-05-12
+**Status:** accepted
+**Context:** API framework choice.
+**Decision:** FastAPI with SQLAlchemy 2 async.
+**Consequences:** Python ecosystem (Pydantic, pytest, ruff, uv). AI tooling is first-class. Slightly less mature than Spring for very high-concurrency cases — acceptable at Phase 1 scale.
+**Alternatives considered:** Spring Boot (Java), Go + chi, Node + tRPC.
+
+## ADR-003: Stock k6 + Python sidecar over xk6 custom build — 2026-05-12
+**Status:** accepted
+**Context:** k6 is AGPLv3. A custom binary served over the network creates AGPL obligations on Testlyn.
+**Decision:** Invoke unmodified `grafana/k6:<pinned-tag>` as a subprocess. A Python sidecar in the same container consumes k6's JSONL output and streams to BigQuery.
+**Consequences:** No AGPL exposure. Sidecar is reusable for any future metric-emitting tool. Slight cost of process boundary + JSONL parse — negligible.
+**Alternatives considered:** xk6-bigquery extension (rejected: derivative work), commercial load tools (rejected: cost, lock-in).
+
+## ADR-004: Gemini 3.1 Flash-Lite as default LLM — 2026-05-12
+**Status:** accepted
+**Context:** AI summaries for daily reports + bottleneck explanation.
+**Decision:** `gemini-3.1-flash-lite` via Vertex AI SDK (Workload Identity, not API keys).
+**Consequences:** Cheap, fast, integrated with GCP IAM. Escalate to Gemini 3.1 Pro only for vision/multi-step reasoning (not Phase 1).
+**Alternatives considered:** Claude Sonnet 4.6 (no Anthropic API key available), GPT-5 Mini (separate vendor relationship).
+
+## ADR-005: Example Co GCP project for Phase 1 — 2026-05-12
+**Status:** accepted
+**Context:** Avoid project creation overhead in Phase 1.
+**Decision:** Reuse Example Co project. Every Testlyn resource prefixed `testlyn-` and labeled `app=testlyn`.
+**Consequences:** Easy bootstrap; billing aggregation by label. Must migrate to dedicated `testlyn-prod` at Phase 3 (multi-region, compliance posture).
+**Alternatives considered:** Dedicated `testlyn-prod` project from day 1 (rejected: friction).
+
+## ADR-006: Identity Platform for auth — 2026-05-12
+**Status:** accepted
+**Context:** Auth provider choice.
+**Decision:** Google Identity Platform (Firebase Auth SDK).
+**Consequences:** GCP-native, free tier covers early scale, social + email/password + OIDC. Locks us to GCP for auth — acceptable per ADR-001.
+**Alternatives considered:** Auth0 (cost), Supabase Auth (separate vendor), self-hosted (rejected: maintenance).
+
+## ADR-007: Postgres + BigQuery split — 2026-05-12
+**Status:** accepted
+**Context:** Single DB or transactional + analytical split.
+**Decision:** Postgres for OLTP (orgs, tests, runs metadata, billing), BigQuery for OLAP (load test sample stream, cross-test analytics).
+**Consequences:** Two systems to operate. Schema migrations in both. Worth it: BQ partitioning + streaming inserts handle k6 sample volume that would crush Postgres.
+**Alternatives considered:** Postgres + TimescaleDB (rejected: still Postgres ceiling), Clickhouse (rejected: extra vendor).
+
+## ADR-008: GitHub as canonical source repo — 2026-05-12
+**Status:** accepted (supersedes implicit GitLab assumption in initial prompt)
+**Context:** Operator's git user is `CCicek22` on GitHub. Original CLAUDE.md draft referenced GitLab.
+**Decision:** GitHub `CCicek22/testlyn` is canonical. CI via GitHub Actions for app builds, Cloud Build GitHub trigger for image publish + Terraform.
+**Consequences:** No GitLab mirror. Cloud Build connects to GitHub repo. `.github/workflows/` instead of `.gitlab/`.
+**Alternatives considered:** GitLab primary (rejected: no existing GitLab account), GitHub + GitLab mirror (rejected: maintenance overhead with zero benefit).

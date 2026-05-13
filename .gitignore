@@ -1,0 +1,71 @@
+# --- Workspaces / build outputs ---
+.claude/worktrees/
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+out/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.pdm-python
+.python-version
+
+# --- uv ---
+.uv/
+uv.lock.local
+
+# --- pnpm / node ---
+.pnpm-store/
+npm-debug.log*
+pnpm-debug.log*
+.npm/
+
+# --- Env / secrets ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+service-account*.json
+gcp-key*.json
+
+# --- Terraform ---
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+crash.log
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Logs / runtime ---
+*.log
+logs/
+tmp/
+.serverless/
+
+# --- Test artifacts ---
+playwright-report/
+test-results/
+.playwright/
