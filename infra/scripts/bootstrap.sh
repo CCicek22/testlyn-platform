@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bootstrap.sh — idempotent GCP project setup for Testlyn
-# Usage: GCP_PROJECT_ID=example-project-prod ./infra/scripts/bootstrap.sh
+# Usage: GCP_PROJECT_ID=example-project ./infra/scripts/bootstrap.sh
 # Requires: gcloud CLI authenticated with Owner/Editor on the project
 set -euo pipefail
 

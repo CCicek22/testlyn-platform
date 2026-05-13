@@ -1,7 +1,7 @@
 variable "gcp_project_id" {
   description = "GCP project ID"
   type        = string
-  default     = "example-project-prod"
+  default     = "example-project"
 }
 
 variable "gcp_project_number" {
@@ -38,31 +38,31 @@ variable "db_password" {
 variable "api_image" {
   description = "Container image for the API service"
   type        = string
-  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/api:latest"
+  default     = "us-central1-docker.pkg.dev/example-project/testlyn/api:latest"
 }
 
 variable "web_image" {
   description = "Container image for the web service"
   type        = string
-  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/web:latest"
+  default     = "us-central1-docker.pkg.dev/example-project/testlyn/web:latest"
 }
 
 variable "engine_image" {
   description = "Container image for the engine job"
   type        = string
-  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/engine:latest"
+  default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine:latest"
 }
 
 variable "engine_playwright_image" {
   description = "Container image for the Playwright engine job (Phase 2)"
   type        = string
-  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/engine-playwright:latest"
+  default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine-playwright:latest"
 }
 
 variable "engine_a11y_image" {
   description = "Container image for the a11y engine job (Phase 2)"
   type        = string
-  default     = "us-central1-docker.pkg.dev/example-project-prod/testlyn/engine-a11y:latest"
+  default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine-a11y:latest"
 }
 
 variable "billing_account_id" {

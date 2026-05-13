@@ -90,7 +90,7 @@ export default function OgImage() {
             alignItems: "center",
           }}
         >
-          <span style={{ fontSize: "18px", color: "#52525B" }}>testlyn.io</span>
+          <span style={{ fontSize: "18px", color: "#52525B" }}>testlyn.example.com</span>
           <span
             style={{
               fontSize: "14px",

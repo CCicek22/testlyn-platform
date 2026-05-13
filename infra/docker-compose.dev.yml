@@ -43,7 +43,7 @@ services:
   bigquery-emulator:
     image: ghcr.io/goccy/bigquery-emulator:latest
     command:
-      - --project=example-project-prod
+      - --project=example-project
       - --port=9050
       - --grpc-port=9060
     ports:
@@ -63,7 +63,7 @@ services:
   bq-emulator-init:
     image: google/cloud-sdk:alpine
     environment:
-      CLOUDSDK_CORE_PROJECT: example-project-prod
+      CLOUDSDK_CORE_PROJECT: example-project
       CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY: "http://bigquery-emulator:9050"
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -77,29 +77,29 @@ services:
 
         # Create dataset
         bq --api http://bigquery-emulator:9050 \
-           --project_id example-project-prod \
+           --project_id example-project \
            mk --dataset \
            --description "Testlyn metrics" \
-           example-project-prod:testlyn_metrics || true
+           example-project:testlyn_metrics || true
 
         # Create samples_1s table
         bq --api http://bigquery-emulator:9050 \
-           --project_id example-project-prod \
+           --project_id example-project \
            mk --table \
            --time_partitioning_type=DAY \
            --time_partitioning_field=window_start \
            --clustering_fields=run_id,metric \
-           example-project-prod:testlyn_metrics.samples_1s \
+           example-project:testlyn_metrics.samples_1s \
            'run_id:STRING,org_id:STRING,product:STRING,region:STRING,window_start:TIMESTAMP,metric:STRING,metric_type:STRING,tag_method:STRING,tag_status:STRING,tag_scenario:STRING,tag_group:STRING,tag_name:STRING,tag_extra:JSON,count:INT64,sum_value:FLOAT64,min_value:FLOAT64,max_value:FLOAT64,p50:FLOAT64,p90:FLOAT64,p95:FLOAT64,p99:FLOAT64,delta:FLOAT64,rate_per_sec:FLOAT64,inserted_at:TIMESTAMP' || true
 
         # Create runs_summary table
         bq --api http://bigquery-emulator:9050 \
-           --project_id example-project-prod \
+           --project_id example-project \
            mk --table \
            --time_partitioning_type=DAY \
            --time_partitioning_field=started_at \
            --clustering_fields=org_id,run_id \
-           example-project-prod:testlyn_metrics.runs_summary \
+           example-project:testlyn_metrics.runs_summary \
            'run_id:STRING,org_id:STRING,product:STRING,region:STRING,started_at:TIMESTAMP,finished_at:TIMESTAMP,vus_max:INT64,iterations:INT64,http_reqs:INT64,http_failed:INT64,data_sent:INT64,data_received:INT64,summary_json:JSON,status:STRING' || true
 
         echo "BQ emulator init complete."

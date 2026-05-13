@@ -16,7 +16,7 @@ set -euo pipefail
 # Defaults
 # ---------------------------------------------------------------------------
 LICENSE_KEY=""
-REGISTRY="us-central1-docker.pkg.dev/example-project-prod/testlyn"
+REGISTRY="us-central1-docker.pkg.dev/example-project/testlyn"
 OUTPUT="/tmp/testlyn-bundle.tar.gz"
 WORK_DIR="$(mktemp -d)"
 IMAGES_DIR="${WORK_DIR}/images"

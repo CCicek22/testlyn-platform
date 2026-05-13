@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # --- GCP ---
-    gcp_project_id: str = "example-project-prod"
+    gcp_project_id: str = "example-project"
     gcp_region: str = "us-central1"
     gcs_scripts_bucket: str = "testlyn-prod-scripts"
     gcs_results_bucket: str = "testlyn-prod-results"

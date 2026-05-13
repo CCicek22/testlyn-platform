@@ -26,7 +26,7 @@ kubectl create secret generic testlyn-secrets -n testlyn \
 # Install chart
 helm install testlyn ./infra/helm/testlyn \
   --namespace testlyn \
-  --set global.gcpProject=example-project-prod \
+  --set global.gcpProject=example-project \
   --set licenseKey=YOUR_LICENSE_KEY
 ```
 

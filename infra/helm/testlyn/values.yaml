@@ -6,13 +6,13 @@ licenseKey: ""
 
 # -- Image registry override for air-gapped deployments.
 # e.g. "registry.corp.example.com/testlyn"
-imageRegistry: "us-central1-docker.pkg.dev/example-project-prod/testlyn"
+imageRegistry: "us-central1-docker.pkg.dev/example-project/testlyn"
 
 global:
   # -- One of: dev | staging | prod
   env: prod
   # -- GCP project ID
-  gcpProject: example-project-prod
+  gcpProject: example-project
   # -- GCP region
   gcpRegion: us-central1
   # -- Kubernetes namespace
@@ -40,7 +40,7 @@ api:
       cpu: "1000m"
       memory: "1Gi"
   serviceAccount:
-    gcpServiceAccount: "testlyn-api@example-project-prod.iam.gserviceaccount.com"
+    gcpServiceAccount: "testlyn-api@example-project.iam.gserviceaccount.com"
   service:
     port: 8080
   autoscaling:
@@ -78,7 +78,7 @@ web:
       cpu: "1000m"
       memory: "1Gi"
   serviceAccount:
-    gcpServiceAccount: "testlyn-web@example-project-prod.iam.gserviceaccount.com"
+    gcpServiceAccount: "testlyn-web@example-project.iam.gserviceaccount.com"
   service:
     port: 3000
   autoscaling:
@@ -107,7 +107,7 @@ engine:
       cpu: "4000m"
       memory: "16Gi"
   serviceAccount:
-    gcpServiceAccount: "testlyn-runner@example-project-prod.iam.gserviceaccount.com"
+    gcpServiceAccount: "testlyn-runner@example-project.iam.gserviceaccount.com"
   ttlSecondsAfterFinished: 3600
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ reportBuilder:
       cpu: "1000m"
       memory: "2Gi"
   serviceAccount:
-    gcpServiceAccount: "testlyn-report@example-project-prod.iam.gserviceaccount.com"
+    gcpServiceAccount: "testlyn-report@example-project.iam.gserviceaccount.com"
   service:
     port: 8081
   autoscaling:
@@ -169,6 +169,6 @@ ingress:
     kubernetes.io/ingress.global-static-ip-name: "testlyn-ip"
     networking.gke.io/managed-certificates: "testlyn-cert"
   hosts:
-    api: "api.testlyn.io"
-    web: "app.testlyn.io"
+    api: "api.testlyn.example.com"
+    web: "testlyn.example.com"
   tls: true

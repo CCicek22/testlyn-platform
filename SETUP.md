@@ -25,7 +25,7 @@ API: <http://localhost:8080>, Web: <http://localhost:3000>.
 
 ## 1. GCP project (Example Co)
 
-- [ ] Get actual Example Co GCP project ID (current placeholder: `example-project-prod`).
+- [ ] Get actual Example Co GCP project ID (current placeholder: `example-project`).
 - [ ] Set `gcloud config set project <id>`.
 - [ ] Enable APIs: `compute`, `run`, `cloudbuild`, `cloudtasks`, `cloudscheduler`, `bigquery`, `sqladmin`, `secretmanager`, `artifactregistry`, `identitytoolkit`, `aiplatform`, `redis`, `storage`.
 - [ ] Create Terraform state bucket: `gsutil mb -p <id> -l us-central1 gs://testlyn-tfstate`.

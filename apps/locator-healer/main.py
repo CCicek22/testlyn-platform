@@ -29,7 +29,7 @@ LOCATOR_HEALING_ENABLED = os.getenv("LOCATOR_HEALING_ENABLED", "0") == "1"
 
 REDIS_URL = os.getenv("REDIS_URL", "")
 GEMINI_PRO_MODEL = os.getenv("GEMINI_PRO_MODEL", "gemini-3.1-pro")
-GCP_PROJECT = os.getenv("GCP_PROJECT", "example-project-prod")
+GCP_PROJECT = os.getenv("GCP_PROJECT", "example-project")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
 
 _CACHE_TTL = 86_400  # 24h
