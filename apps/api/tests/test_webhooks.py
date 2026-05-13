@@ -236,7 +236,7 @@ async def test_dispatcher_fire_skips_unknown_event(db_session: AsyncSession) -> 
 
 @pytest.mark.asyncio
 async def test_dispatcher_fire_skips_inactive_endpoint(db_session: AsyncSession) -> None:
-    org_id = uuid.uuid4()
+    org_id = await _seed_org(db_session)
     ep = WebhookEndpoint(
         org_id=org_id,
         url="https://example.com/hook",
@@ -256,7 +256,7 @@ async def test_dispatcher_fire_skips_inactive_endpoint(db_session: AsyncSession)
 
 @pytest.mark.asyncio
 async def test_dispatcher_fire_skips_unsubscribed_event(db_session: AsyncSession) -> None:
-    org_id = uuid.uuid4()
+    org_id = await _seed_org(db_session)
     ep = WebhookEndpoint(
         org_id=org_id,
         url="https://example.com/hook",
@@ -276,7 +276,7 @@ async def test_dispatcher_fire_skips_unsubscribed_event(db_session: AsyncSession
 
 @pytest.mark.asyncio
 async def test_dispatcher_fire_creates_delivery(db_session: AsyncSession) -> None:
-    org_id = uuid.uuid4()
+    org_id = await _seed_org(db_session)
     ep = WebhookEndpoint(
         org_id=org_id,
         url="https://example.com/hook",

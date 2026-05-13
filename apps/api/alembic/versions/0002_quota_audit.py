@@ -56,11 +56,18 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_audit_log_org_created",
-        "audit_log",
-        ["org_id", sa.text("created_at DESC")],
-    )
+    if op.get_bind().dialect.name == "postgresql":
+        op.create_index(
+            "ix_audit_log_org_created",
+            "audit_log",
+            ["org_id", sa.text("created_at DESC")],
+        )
+    else:
+        op.create_index(
+            "ix_audit_log_org_created",
+            "audit_log",
+            ["org_id", "created_at"],
+        )
 
 
 def downgrade() -> None:

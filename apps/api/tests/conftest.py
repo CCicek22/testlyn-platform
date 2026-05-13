@@ -6,6 +6,7 @@ import uuid
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event as sa_event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Force dev bypass + docker mode before any app imports
@@ -31,12 +32,19 @@ import fakeredis  # type: ignore[import-untyped]
 # Patch the rate limiter to use fakeredis so tests don't attempt real TCP
 # connections to Redis (which hangs until OS TCP timeout fires).
 import fakeredis.aioredis  # type: ignore[import-untyped]
-from sqlalchemy import JSON
+from sqlalchemy import JSON, text
 from sqlalchemy.dialects.postgresql import JSONB
 from testlyn_api.core.db import Base
+from testlyn_api.models.org import Organization, OrgMember
+from testlyn_api.models.user import User
 from testlyn_api.core.rate_limit import RateLimiter
 from testlyn_api.deps import get_session
 from testlyn_api.main import app
+
+def _enable_sqlite_fk(dbapi_conn, connection_record):  # noqa: ANN001
+    """Enable FK enforcement for SQLite connections (no-op on other dialects)."""
+    dbapi_conn.execute("PRAGMA foreign_keys = ON")
+
 
 # Shared FakeServer so all FakeRedis instances share the same key space within
 # a test, but we can flush between tests.
@@ -67,6 +75,7 @@ TEST_ENGINE = create_async_engine(
     "sqlite+aiosqlite:///:memory:",
     connect_args={"check_same_thread": False},
 )
+sa_event.listen(TEST_ENGINE.sync_engine, "connect", _enable_sqlite_fk)
 TestSessionLocal = async_sessionmaker(TEST_ENGINE, expire_on_commit=False)
 
 
@@ -94,6 +103,43 @@ async def setup_db():
         await conn.run_sync(Base.metadata.drop_all)
 
 
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def _seed_dev_entities(setup_db):  # noqa: ANN001
+    """Pre-seed dev user + org + membership so _seed_dev_user() early-returns.
+
+    With PRAGMA foreign_keys = ON, SQLAlchemy's add_all([user, org, member])
+    can fail because SQLite evaluates FK constraints at INSERT time before the
+    parent rows are flushed.  Seeding here with explicit sequential flushes
+    guarantees the rows exist before any request triggers the bypass path.
+    """
+    async with TestSessionLocal() as session:
+        user = User(
+            id=_DEV_USER_ID,
+            email="dev@testlyn.io",
+            name="Dev User",
+            firebase_uid=None,
+        )
+        session.add(user)
+        await session.flush()
+
+        org = Organization(
+            id=_DEV_ORG_ID,
+            name="Dev Org",
+            slug="dev-org",
+            plan="free",
+        )
+        session.add(org)
+        await session.flush()
+
+        member = OrgMember(
+            org_id=_DEV_ORG_ID,
+            user_id=_DEV_USER_ID,
+            role="owner",
+        )
+        session.add(member)
+        await session.commit()
+
+
 @pytest_asyncio.fixture
 async def db_session() -> AsyncSession:
     async with TestSessionLocal() as session:
@@ -118,6 +164,15 @@ def dev_user_id() -> uuid.UUID:
     return uuid.UUID("00000000-0000-0000-0000-d3eff3e10101")
 
 
+_DEV_USER_ID = uuid.UUID("00000000-0000-0000-0000-d3eff3e10101")
+_DEV_ORG_ID = uuid.UUID("00000000-0000-0000-0000-d3eff3e10102")
+
+
 @pytest.fixture
-def dev_org_id() -> uuid.UUID:
-    return uuid.UUID("00000000-0000-0000-0000-d3eff3e10102")
+async def dev_org_id(_seed_dev_entities) -> uuid.UUID:  # noqa: ANN001
+    """Return the pre-seeded dev org UUID.
+
+    The org row is guaranteed by _seed_dev_entities (autouse), so callers get
+    a valid FK-backed UUID without needing to insert anything themselves.
+    """
+    return _DEV_ORG_ID

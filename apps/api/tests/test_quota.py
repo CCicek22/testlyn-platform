@@ -5,6 +5,8 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.models.org import Organization
+from testlyn_api.models.project import Project
+from testlyn_api.models.test import Test as TestModel
 from testlyn_api.models.test_run import TestRun
 from testlyn_api.models.usage import UsageRecord
 from testlyn_api.services.quota import QuotaService
@@ -18,13 +20,23 @@ def _make_org(plan: str = "free") -> Organization:
     )
 
 
-def _make_run() -> TestRun:
-    return TestRun(
-        test_id=uuid.uuid4(),
+async def _make_run(session: AsyncSession, org: Organization) -> TestRun:
+    """Create a full org→project→test→run chain respecting FK constraints."""
+    proj = Project(org_id=org.id, name="P", slug=f"p-{uuid.uuid4().hex[:6]}")
+    session.add(proj)
+    await session.flush()
+
+    test = TestModel(project_id=proj.id, name="T", script_inline="export default function(){}")
+    session.add(test)
+    await session.flush()
+
+    run = TestRun(
+        test_id=test.id,
         product="load",
         state="queued",
         region="us-central1",
     )
+    return run
 
 
 @pytest.mark.asyncio
@@ -136,7 +148,7 @@ async def test_record_usage_round_trips(db_session: AsyncSession) -> None:
     db_session.add(org)
     await db_session.flush()
 
-    run = _make_run()
+    run = await _make_run(db_session, org)
     db_session.add(run)
     await db_session.flush()
 
@@ -170,12 +182,12 @@ async def test_record_usage_increments(db_session: AsyncSession) -> None:
 
     quota = QuotaService(db_session)
 
-    run1 = _make_run()
+    run1 = await _make_run(db_session, org)
     db_session.add(run1)
     await db_session.flush()
     await quota.record_usage(org, run1)
 
-    run2 = _make_run()
+    run2 = await _make_run(db_session, org)
     db_session.add(run2)
     await db_session.flush()
     await quota.record_usage(org, run2)

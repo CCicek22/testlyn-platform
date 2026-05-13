@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import sys
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
+
+# Repo-root-relative paths — work on any machine, no absolute paths.
+_ENGINE_A11Y = Path(__file__).resolve().parents[3] / "apps" / "engine-a11y"
+_ENGINE = Path(__file__).resolve().parents[3] / "apps" / "engine"
 
 # ---------------------------------------------------------------------------
 # A11yRunner tests
@@ -283,64 +289,53 @@ async def test_get_violations_stub(client: AsyncClient) -> None:
 
 
 class TestAxeParser:
-    def test_parse_valid_line(self) -> None:
-        import sys
+    @pytest.fixture(autouse=True)
+    def _inject_engine_a11y(self) -> None:
+        """Ensure engine-a11y and engine (sidecar) are importable without absolute paths."""
+        for p in (str(_ENGINE_A11Y), str(_ENGINE)):
+            if p not in sys.path:
+                sys.path.insert(0, p)
 
-        sys.path.insert(0, "./apps/engine-a11y")
+    def test_parse_valid_line(self) -> None:
         from parser.axe import parse_line
 
         line = '{"run_id":"abc","rule_id":"color-contrast","impact":"serious","html_snippet":"<button>X</button>","dom_path":"body > button","help_url":"https://dequeuniversity.com/","target_url":"https://example.com"}'
-        event = parse_line(line, org_id="org1", region="us-central1")
+        event = parse_line(line)
         assert event is not None
         assert event.metric == "violation.serious"
-        assert event.product == "a11y"
-        assert event.run_id == "abc"
-        assert event.count == 1
+        assert event.value == 1.0
+        assert event.tags["severity"] == "serious"
+        assert event.tags["rule_id"] == "color-contrast"
 
     @pytest.mark.parametrize(
         "impact",
         ["critical", "serious", "moderate", "minor"],
     )
     def test_all_valid_impacts(self, impact: str) -> None:
-        import sys
-
-        sys.path.insert(0, "./apps/engine-a11y")
         from parser.axe import parse_line
 
         line = f'{{"run_id":"r1","rule_id":"rule","impact":"{impact}","html_snippet":"<x>","dom_path":"x","help_url":"http://h","target_url":"http://t"}}'
-        event = parse_line(line, org_id="o", region="r")
+        event = parse_line(line)
         assert event is not None
         assert event.metric == f"violation.{impact}"
 
     def test_invalid_impact_returns_none(self) -> None:
-        import sys
-
-        sys.path.insert(0, "./apps/engine-a11y")
         from parser.axe import parse_line
 
         line = '{"run_id":"r1","rule_id":"rule","impact":"catastrophic","html_snippet":"<x>","dom_path":"x","help_url":"http://h","target_url":"http://t"}'
-        assert parse_line(line, org_id="o", region="r") is None
+        assert parse_line(line) is None
 
     def test_malformed_json_returns_none(self) -> None:
-        import sys
-
-        sys.path.insert(0, "./apps/engine-a11y")
         from parser.axe import parse_line
 
-        assert parse_line("not-json", org_id="o", region="r") is None
+        assert parse_line("not-json") is None
 
     def test_empty_line_returns_none(self) -> None:
-        import sys
-
-        sys.path.insert(0, "./apps/engine-a11y")
         from parser.axe import parse_line
 
-        assert parse_line("", org_id="o", region="r") is None
+        assert parse_line("") is None
 
     def test_iter_events_filters_invalid(self) -> None:
-        import sys
-
-        sys.path.insert(0, "./apps/engine-a11y")
         from parser.axe import iter_events
 
         lines = [
@@ -348,7 +343,7 @@ class TestAxeParser:
             "not-json",
             '{"run_id":"r","rule_id":"b","impact":"minor","html_snippet":"<y>","dom_path":"y","help_url":"http://h2","target_url":"http://t2"}',
         ]
-        events = list(iter_events(iter(lines), org_id="o", region="r"))
+        events = list(iter_events(iter(lines)))
         assert len(events) == 2
         assert events[0].metric == "violation.critical"
         assert events[1].metric == "violation.minor"

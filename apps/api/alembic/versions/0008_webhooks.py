@@ -1,12 +1,11 @@
 """Add webhook_endpoints and webhook_deliveries tables
 
 Revision ID: 0008
-Revises: 0005
+Revises: 0007
 Create Date: 2026-05-13 00:00:00.000000
 
-NOTE: Chains on 0005 (a11y summary cols) since migrations 0006 (W3A RBAC)
-and 0007 (W3A audit SIEM) are owned by stream W3A which may land separately.
-W3A will rebase down_revision to point to 0007 when it merges.
+Chains on 0007 (audit_siem) — streams W3A (RBAC/audit, 0006+0007) merged before
+this migration so the chain is now linear: 0005 → 0006 → 0007 → 0008.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "0008"
-down_revision: str | None = "0005"
+down_revision: str | None = "0007"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -118,11 +117,18 @@ def upgrade() -> None:
         ),
     )
     # Primary query pattern: delivery log for an endpoint, newest first
-    op.create_index(
-        "ix_webhook_deliveries_endpoint_created",
-        "webhook_deliveries",
-        ["endpoint_id", sa.text("created_at DESC")],
-    )
+    if op.get_bind().dialect.name == "postgresql":
+        op.create_index(
+            "ix_webhook_deliveries_endpoint_created",
+            "webhook_deliveries",
+            ["endpoint_id", sa.text("created_at DESC")],
+        )
+    else:
+        op.create_index(
+            "ix_webhook_deliveries_endpoint_created",
+            "webhook_deliveries",
+            ["endpoint_id", "created_at"],
+        )
     # Retry scheduler query: find pending/failed deliveries due for retry
     op.create_index(
         "ix_webhook_deliveries_status_retry",

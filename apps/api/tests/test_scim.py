@@ -302,8 +302,10 @@ async def test_scim_list_groups_empty_scaffold() -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_list_users_empty(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
-    resp = await client.get(f"/v2/scim/{dev_org_id}/Users")
+async def test_api_list_users_empty(client: AsyncClient, db_session: AsyncSession) -> None:
+    # Use a fresh org with no members so totalResults is deterministically 0
+    org = await _make_org(db_session)
+    resp = await client.get(f"/v2/scim/{org.id}/Users")
     assert resp.status_code == 200
     data = resp.json()
     assert data["schemas"] == [SCIM_LIST_SCHEMA]

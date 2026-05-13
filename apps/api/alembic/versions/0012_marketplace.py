@@ -109,6 +109,7 @@ def upgrade() -> None:
               (:id2, 'p95-heatmap', 'panel', 'P95 Latency Heatmap',
                'Dashboard panel showing p95 latency distribution as a heatmap over the run timeline.',
                'community', '0.2.1', 87)
+            ON CONFLICT (slug) DO NOTHING
             """
         ).bindparams(
             id1=str(uuid.uuid4()),
@@ -136,6 +137,7 @@ def upgrade() -> None:
               (:id4, 'k6-grpc-load', 'gRPC Service Load',
                'Load test for unary gRPC endpoints with per-RPC p50/p95/p99 reporting.',
                'load', 'community', 0)
+            ON CONFLICT (slug) DO NOTHING
             """
         ).bindparams(
             id1=str(uuid.uuid4()),

@@ -5,28 +5,23 @@ import uuid
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from testlyn_api.models.org import Organization
 from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test as TestModel
 from testlyn_api.models.test_run import TestRun as TestRunModel
-from testlyn_api.models.user import User
+
+
+_DEV_ORG_ID = uuid.UUID("00000000-0000-0000-0000-d3eff3e10102")
 
 
 async def _create_run(session: AsyncSession) -> uuid.UUID:
-    """Seed minimal DB rows and return a queued run id."""
-    user = User(
-        id=uuid.UUID("00000000-0000-0000-0000-d3eff3e10101"),
-        email="dev@testlyn.io",
-    )
-    org = Organization(
-        id=uuid.UUID("00000000-0000-0000-0000-d3eff3e10102"),
-        name="Dev Org",
-        slug="dev-org",
-    )
-    session.add_all([user, org])
-    await session.flush()
+    """Seed minimal DB rows and return a queued run id.
 
-    proj = Project(org_id=org.id, name="P", slug="p")
+    User + org rows are pre-seeded by the autouse _seed_dev_entities fixture
+    in conftest; use merge() so this helper is idempotent.
+    """
+    org_id = _DEV_ORG_ID
+
+    proj = Project(org_id=org_id, name="P", slug="p")
     session.add(proj)
     await session.flush()
 

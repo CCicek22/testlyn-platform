@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
@@ -121,3 +123,54 @@ async def test_get_run(client: AsyncClient, monkeypatch) -> None:
     get_resp = await client.get(f"/v1/runs/{run_id}")
     assert get_resp.status_code == 200
     assert get_resp.json()["id"] == run_id
+
+
+# ---------------------------------------------------------------------------
+# Negative-path (404 / 422) tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_nonexistent_org_returns_404(client: AsyncClient) -> None:
+    resp = await client.get(f"/v1/orgs/{uuid.uuid4()}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_nonexistent_test_returns_404(client: AsyncClient) -> None:
+    resp = await client.get(f"/v1/tests/{uuid.uuid4()}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_nonexistent_run_returns_404(client: AsyncClient) -> None:
+    resp = await client.get(f"/v1/runs/{uuid.uuid4()}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_org_missing_name_returns_422(client: AsyncClient) -> None:
+    resp = await client.post("/v1/orgs", json={})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_test_nonexistent_project_returns_404(client: AsyncClient) -> None:
+    resp = await client.post(
+        f"/v1/projects/{uuid.uuid4()}/tests",
+        json={
+            "name": "Ghost Test",
+            "script_inline": "export default function() {}",
+            "config": {"vus": 1, "duration_seconds": 5},
+        },
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_project_nonexistent_org_returns_404(client: AsyncClient) -> None:
+    resp = await client.post(
+        f"/v1/orgs/{uuid.uuid4()}/projects",
+        json={"name": "Ghost Project", "slug": "ghost-project"},
+    )
+    assert resp.status_code == 404
