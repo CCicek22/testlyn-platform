@@ -26,15 +26,65 @@ os.environ.setdefault("K6_IMAGE_TAG", "grafana/k6:1.3.0")
 os.environ.setdefault("SSE_HEARTBEAT_INTERVAL", "0.5")
 os.environ.setdefault("SSE_MAX_TICKS", "1")
 
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
+
 from testlyn_api.core.db import Base
 from testlyn_api.deps import get_session
 from testlyn_api.main import app
+
+# Patch the rate limiter to use fakeredis so tests don't attempt real TCP
+# connections to Redis (which hangs until OS TCP timeout fires).
+import fakeredis.aioredis  # type: ignore[import-untyped]
+import fakeredis  # type: ignore[import-untyped]
+
+from testlyn_api.core.rate_limit import RateLimiter
+
+# Shared FakeServer so all FakeRedis instances share the same key space within
+# a test, but we can flush between tests.
+_fake_server = fakeredis.FakeServer()
+
+
+async def _fake_get_redis(self: RateLimiter):  # type: ignore[override]
+    # If a test has injected a mock directly via limiter._redis, respect it.
+    if self._redis is not None:
+        return self._redis
+    return fakeredis.aioredis.FakeRedis(server=_fake_server, decode_responses=False)
+
+
+RateLimiter._get_redis = _fake_get_redis  # type: ignore[method-assign]
+
+# SQLite does not support JSONB. Replace JSONB columns with JSON so that
+# in-memory SQLite test DB can create all tables without dialect errors.
+# This runs once at import time, before any engine is created.
+def _patch_jsonb_for_sqlite() -> None:
+    for table in Base.metadata.tables.values():
+        for col in table.columns:
+            if isinstance(col.type, JSONB):
+                col.type = JSON()
+
+_patch_jsonb_for_sqlite()
 
 TEST_ENGINE = create_async_engine(
     "sqlite+aiosqlite:///:memory:",
     connect_args={"check_same_thread": False},
 )
 TestSessionLocal = async_sessionmaker(TEST_ENGINE, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_rate_limit_store() -> None:
+    """Flush fakeredis and in-memory fallback between tests."""
+    import testlyn_api.core.rate_limit as _rl
+
+    # Flush all keys in the shared fake redis server
+    r = fakeredis.aioredis.FakeRedis(server=_fake_server, decode_responses=False)
+    await r.flushall()
+    await r.aclose()
+
+    # Reset the in-process fallback bucket (module-level singleton)
+    _rl._fallback._buckets.clear()  # type: ignore[attr-defined]
+    _rl._redis_unavailable_logged = False
 
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
