@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # entrypoint.sh — Testlyn engine-a11y
 #
 # Invoked by tini as PID 1. Runs one axe-core audit per URL batch.
@@ -16,7 +16,7 @@
 #   ORG_ID           — org context for BQ rows (default 'unknown')
 #   REGION           — GCP region label for BQ rows (default us-central1)
 
-set -eu
+set -euo pipefail
 
 : "${RUN_ID:?RUN_ID is required}"
 : "${AUDIT_URLS:?AUDIT_URLS is required}"
@@ -33,20 +33,22 @@ export RUN_ID AUDIT_URLS MAX_DEPTH WCAG_TAGS
 
 echo "[engine-a11y] run_id=${RUN_ID} urls=${AUDIT_URLS} depth=${MAX_DEPTH}"
 
-# Run axe audit, pipe JSONL stdout into the BQ sidecar parser.
-# The sidecar is responsible for batching rows and streaming to BQ.
-# On error, exit non-zero so Cloud Run Job marks the execution failed.
-node /scripts/run-axe.js \
-  | python /sidecar/main.py \
-      --product a11y \
-      --parser axe \
-      --run-id "${RUN_ID}" \
-      --org-id "${ORG_ID}" \
-      --region "${REGION}" \
-      --bq-dataset "${BQ_DATASET}" \
-      --gcp-project "${GCP_PROJECT}"
+# Run axe audit, pipe JSONL stdout into the BQ sidecar.
+# Sidecar config is env-var driven per spec §10 — no CLI flags accepted.
+# Capture node's exit code via PIPESTATUS[0]; sidecar exit is secondary.
+set +e
+PRODUCT=a11y \
+    PARSER=axe \
+    ORG_ID="${ORG_ID}" \
+    REGION="${REGION}" \
+    BQ_DATASET="${BQ_DATASET}" \
+    GCP_PROJECT="${GCP_PROJECT}" \
+    node /scripts/run-axe.js \
+    | python -m sidecar.main
+NODE_EXIT="${PIPESTATUS[0]}"
+set -e
 
-EXIT_CODE=$?
+EXIT_CODE="${NODE_EXIT}"
 
 # Notify API of completion regardless of exit code.
 curl -sf -X POST "${CALLBACK_URL}" \
