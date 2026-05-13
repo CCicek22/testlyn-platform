@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     # --- Web ---
     web_base_url: str = "http://localhost:3000"
 
+    # --- Gemini / Vertex AI ---
+    gemini_model: str = "gemini-3.1-flash-lite"
+    vertex_ai_location: str = "us-central1"
+
+    # --- Stripe ---
+    stripe_secret_key: str = "sk_test_PLACEHOLDER"
+    stripe_webhook_secret: str = "whsec_PLACEHOLDER"
+
     # --- k6 ---
     k6_image_tag: str = "grafana/k6:1.3.0"
 

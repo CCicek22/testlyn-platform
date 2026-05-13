@@ -6,7 +6,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from testlyn_api.config import get_settings
-from testlyn_api.routers import auth, internal, orgs, projects, stream, test_runs, tests, webhooks
+from testlyn_api.routers import (
+    auth,
+    internal,
+    orgs,
+    projects,
+    schedules,
+    stream,
+    test_runs,
+    tests,
+    webhooks,
+)
 
 structlog.configure(
     processors=[
@@ -47,6 +57,7 @@ app.include_router(tests.router)
 app.include_router(test_runs.router)
 app.include_router(stream.router)
 app.include_router(webhooks.router)
+app.include_router(schedules.router)
 app.include_router(internal.router)
 
 

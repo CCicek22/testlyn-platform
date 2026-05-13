@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+
+from testlyn_api.deps import SessionDep
+from testlyn_api.services import stripe_webhook as svc
 
 log = structlog.get_logger(__name__)
 
@@ -10,16 +13,28 @@ router = APIRouter(prefix="/v1/webhooks", tags=["webhooks"])
 
 
 @router.post("/stripe", status_code=status.HTTP_200_OK)
-async def stripe_webhook(request: Request) -> JSONResponse:
-    """
-    Stripe webhook stub — Phase 1.
-    Returns 200 and logs the event type. Real Stripe integration in Phase 1 follow-up.
-    """
-    try:
-        payload = await request.json()
-        event_type = payload.get("type", "unknown")
-        log.info("webhook.stripe", event_type=event_type)
-    except Exception:
-        log.warning("webhook.stripe_parse_error")
+async def stripe_webhook(
+    request: Request,
+    session: SessionDep,
+    stripe_signature: str | None = Header(None, alias="stripe-signature"),
+) -> JSONResponse:
+    """Verify and dispatch Stripe webhook events."""
+    raw_body = await request.body()
+    sig = stripe_signature or ""
 
-    return JSONResponse({"received": True})
+    try:
+        import stripe as stripe_lib
+
+        result = await svc.handle_event(raw_body, sig, session)
+        return JSONResponse(result)
+    except stripe_lib.errors.SignatureVerificationError as sig_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Stripe signature",
+        ) from sig_err
+    except Exception as exc:
+        log.exception("webhook.stripe_error", detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook processing error",
+        ) from exc

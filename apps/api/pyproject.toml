@@ -16,6 +16,11 @@ dependencies = [
     "google-cloud-storage>=3.10.1",
     "google-cloud-bigquery>=3.27.0",
     "google-cloud-run>=0.10.0",
+    "google-cloud-aiplatform>=1.70.0",
+    "google-cloud-scheduler>=2.14.0",
+    "redis>=5.0.0",
+    "stripe>=10.0.0",
+    "croniter>=2.0.0",
     "httpx>=0.28.1",
     "structlog>=25.3.0",
     "python-multipart>=0.0.26",
@@ -30,6 +35,7 @@ dev = [
     "ruff>=0.11.0",
     "mypy>=1.15.0",
     "aiosqlite>=0.21.0",
+    "fakeredis>=2.26.0",
 ]
 
 [build-system]
