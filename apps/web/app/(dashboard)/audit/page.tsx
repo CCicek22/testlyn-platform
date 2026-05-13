@@ -88,17 +88,18 @@ function ActionBadge({ action }: { action: string }) {
 function AuditRow({ entry }: { entry: AuditLogEntry }) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails = entry.before != null || entry.after != null;
+  // Stable ID for aria-controls linkage between toggle button and detail row.
+  const detailRowId = `audit-detail-${entry.id}`;
 
   return (
     <>
-      <tr
-        className={[
-          "border-b border-zinc-800/60 text-sm",
-          hasDetails ? "cursor-pointer hover:bg-zinc-800/40" : "",
-        ].join(" ")}
-        onClick={() => hasDetails && setExpanded((v) => !v)}
-        aria-expanded={hasDetails ? expanded : undefined}
-      >
+      {/*
+        R5-C3: <tr> is not an interactive element — aria-expanded + onClick on
+        <tr> is invalid ARIA and unreachable by keyboard. The expand toggle is
+        now a <button> inside the last <td> so it gets focus, Enter/Space, and
+        correct aria-expanded / aria-controls attributes.
+      */}
+      <tr className="border-b border-zinc-800/60 text-sm">
         <td className="whitespace-nowrap py-2.5 pl-4 pr-3 text-zinc-500">
           {new Date(entry.created_at).toLocaleString()}
         </td>
@@ -115,11 +116,37 @@ function AuditRow({ entry }: { entry: AuditLogEntry }) {
           {entry.actor_user_id ?? "system"}
         </td>
         <td className="py-2.5 pl-3 pr-4 text-zinc-600">
-          {entry.ip ?? "—"}
+          <div className="flex items-center justify-between gap-2">
+            <span>{entry.ip ?? "—"}</span>
+            {hasDetails && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                aria-expanded={expanded}
+                aria-controls={detailRowId}
+                aria-label="Toggle row details"
+                className="flex-shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500"
+              >
+                <svg
+                  className={[
+                    "h-3.5 w-3.5 transition-transform",
+                    expanded ? "rotate-180" : "",
+                  ].join(" ")}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            )}
+          </div>
         </td>
       </tr>
       {expanded && hasDetails && (
-        <tr className="border-b border-zinc-800/60 bg-zinc-900">
+        <tr id={detailRowId} className="border-b border-zinc-800/60 bg-zinc-900">
           <td colSpan={6} className="px-4 py-3">
             <div className="grid gap-3 sm:grid-cols-2">
               {entry.before != null && (

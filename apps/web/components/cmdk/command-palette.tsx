@@ -35,12 +35,15 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
 
-  // Pre-fetch recent runs so palette opens without waiting
+  // Fetch recent runs when the palette is opened. `enabled: open` prevents the
+  // call firing on every dashboard mount before GET /v1/runs is wired (R5-B2).
+  // Once F2's route lands and the query succeeds, staleTime keeps it cached for
+  // 30 s so subsequent opens feel instant.
   const { data: recentRuns = [] } = useQuery({
     queryKey: ["runs", "recent"],
     queryFn: () => api.runs.list("load", 20),
     staleTime: 30_000,
-    enabled: true, // pre-populate on dashboard mount
+    enabled: open,
   });
 
   // Reset search when palette closes

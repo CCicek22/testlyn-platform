@@ -19,17 +19,35 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Thrown when getIdToken() returns null and DEV_AUTH_BYPASS is not active.
+ * React Query surfaces this via the `error` state; catch at layout level to
+ * show a "Sign in to continue" fallback instead of silently sending an
+ * anonymous request.
+ */
+export class UnauthenticatedError extends Error {
+  constructor() {
+    super("No authenticated session. Sign in to continue.");
+    this.name = "UnauthenticatedError";
+  }
+}
+
 async function request<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
   const token = await getIdToken();
 
+  // R5-C4: Null token outside dev-bypass means the user is not signed in.
+  // Throw a typed error so React Query's error state can surface a sign-in
+  // prompt instead of silently sending an anonymous (and rejected) request.
+  if (!token) {
+    throw new UnauthenticatedError();
+  }
+
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
+  headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
 
@@ -54,10 +72,13 @@ async function request<T>(
 async function requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
   const token = await getIdToken();
 
-  const headers = new Headers(init.headers);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  // R5-C4: Same guard as `request` above — never send anonymous requests.
+  if (!token) {
+    throw new UnauthenticatedError();
   }
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
 
@@ -236,6 +257,13 @@ export const api = {
   },
 
   audit: {
+    /**
+     * Wire-name convention (R5-B3):
+     * Frontend uses `from_dt` / `to_dt` throughout, matching the FastAPI query
+     * parameter names after F2 removed the `alias="from"` / `alias="to"` shims.
+     * Do NOT rename to bare `from` / `to` — those shadow Python builtins and
+     * required the now-removed aliases.
+     */
     list: (orgId: string, params: AuditListParams = {}) => {
       const p = new URLSearchParams();
       if (params.limit) p.set("limit", String(params.limit));

@@ -2,7 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import { useAuth } from "@/components/auth/auth-provider";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { MeResponse } from "@testlyn/shared";
 
 interface InsightsSnapshot {
   id: string | null;
@@ -15,6 +17,18 @@ interface InsightsSnapshot {
   synthetic_data_freshness_h: number | null;
   payload: Record<string, unknown> | null;
 }
+
+// R5-C2: Typed key union scoped to the numeric KPI fields on InsightsSnapshot.
+// Derived as a pick of the keys whose values are `number | null`, so the
+// KpiCard value prop stays correctly typed without any `as` cast.
+type KpiKey = Extract<
+  keyof InsightsSnapshot,
+  | "p95_latency_ms"
+  | "a11y_score"
+  | "open_critical_findings"
+  | "contract_drift_count"
+  | "synthetic_data_freshness_h"
+>;
 
 interface KpiCardProps {
   label: string;
@@ -51,7 +65,7 @@ function KpiCard({ label, value, unit, accent, description }: KpiCardProps) {
 }
 
 const KPI_DEFS: Array<{
-  key: keyof InsightsSnapshot;
+  key: KpiKey;
   label: string;
   unit?: string;
   accent: string;
@@ -93,14 +107,43 @@ const KPI_DEFS: Array<{
 ];
 
 export default function InsightsPage() {
-  // TODO: replace with real org_id from auth context once org selector lands
-  const orgId = "00000000-0000-0000-0000-000000000000";
+  const { user } = useAuth();
+
+  // R5-C1: Derive org ID from auth context via api.me() instead of hardcoding
+  // the placeholder UUID which caused 403/404 for every real user.
+  const { data: me } = useQuery<MeResponse>({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: user != null,
+    staleTime: 5 * 60_000,
+  });
+
+  const orgId = me?.memberships?.[0]?.org?.id ?? null;
 
   const { data: snapshot, isLoading } = useQuery<InsightsSnapshot>({
     queryKey: ["insights", "latest", orgId],
-    queryFn: () => api.insights.latest<InsightsSnapshot>(orgId),
+    queryFn: () => api.insights.latest<InsightsSnapshot>(orgId!),
     refetchInterval: 60_000,
+    enabled: orgId != null,
   });
+
+  if (!user) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-zinc-400">Sign in to continue.</p>
+      </div>
+    );
+  }
+
+  if (me != null && orgId == null) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-zinc-400">
+          Select an organization to view insights.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -123,7 +166,9 @@ export default function InsightsPage() {
             <KpiCard
               key={kpi.key}
               label={kpi.label}
-              value={snapshot?.[kpi.key] as number | null ?? null}
+              // R5-C2: snapshot[kpi.key] is typed as number | null via KpiKey —
+              // no unsafe `as` cast needed.
+              value={snapshot?.[kpi.key] ?? null}
               unit={kpi.unit}
               accent={kpi.accent}
               description={kpi.description}
