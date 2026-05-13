@@ -125,14 +125,19 @@ if ! kill -0 "${SIDECAR_PID}" 2>/dev/null; then
 fi
 
 # 4. Run Playwright
+# Playwright emits a single JSON blob on stdout; write directly to a temp file
+# so we capture its true exit code via $?, then copy into the named pipe for
+# the sidecar.  Using `tee` would capture tee's exit, not Playwright's.
 echo "[entrypoint] running Playwright tests"
 set +e
 npx playwright test \
     --reporter=json \
     "${WORK_DIR}/test.spec.ts" \
-    2>&1 | tee "${PW_OUTPUT_PATH}" > "${WORK_DIR}/pw-summary.json"
+    > "${WORK_DIR}/pw-summary.json" 2>&1
 PW_EXIT=$?
 set -e
+# Feed the JSON blob into the sidecar's named pipe (sidecar reads one blob)
+cat "${WORK_DIR}/pw-summary.json" > "${PW_OUTPUT_PATH}" &
 echo "[entrypoint] playwright exited with code ${PW_EXIT}"
 
 if ! kill -0 "${SIDECAR_PID}" 2>/dev/null; then
