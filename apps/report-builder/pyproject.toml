@@ -1,0 +1,31 @@
+[project]
+name = "testlyn-report-builder"
+version = "0.1.0"
+description = "Testlyn report builder — PDF reports + AI summaries. Stub for Phase 1 slice."
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "structlog>=24.4",
+    "google-cloud-storage>=2.18",
+    "google-cloud-bigquery>=3.27",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["report_builder"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
