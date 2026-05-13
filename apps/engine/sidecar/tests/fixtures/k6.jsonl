@@ -1,0 +1,16 @@
+{"type":"Metric","data":{"name":"http_req_duration","type":"trend","contains":"time","thresholds":["p(95)<500"],"submetrics":null},"metric":"http_req_duration"}
+{"type":"Metric","data":{"name":"http_reqs","type":"counter","contains":"default","thresholds":[],"submetrics":null},"metric":"http_reqs"}
+{"type":"Metric","data":{"name":"http_req_failed","type":"rate","contains":"default","thresholds":[],"submetrics":null},"metric":"http_req_failed"}
+{"type":"Metric","data":{"name":"vus","type":"gauge","contains":"default","thresholds":[],"submetrics":null},"metric":"vus"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.100Z","value":120.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.200Z","value":180.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.300Z","value":95.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.400Z","value":450.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.500Z","value":210.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.600Z","value":1.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_reqs"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.700Z","value":0.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"200","scenario":"default","group":""}},"metric":"http_req_failed"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:00.800Z","value":10.0,"tags":{}},"metric":"vus"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:01.100Z","value":300.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"500","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:01.200Z","value":310.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"500","scenario":"default","group":""}},"metric":"http_req_duration"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:01.300Z","value":1.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"500","scenario":"default","group":""}},"metric":"http_reqs"}
+{"type":"Point","data":{"time":"2026-05-12T14:23:01.400Z","value":1.0,"tags":{"name":"https://api.example.com/users","method":"GET","status":"500","scenario":"default","group":""}},"metric":"http_req_failed"}

@@ -1,0 +1,68 @@
+[project]
+name = "testlyn-engine"
+version = "0.1.0"
+description = "Testlyn k6 worker container — BQ sidecar"
+requires-python = ">=3.13"
+dependencies = [
+    "google-cloud-bigquery>=3.27",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "structlog>=25.3",
+    "tenacity>=9.1",
+    "numpy>=2.4",
+    "aiohttp>=3.11",
+    "aiofiles>=24.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.26",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    "types-aiofiles>=24.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sidecar"]
+
+[tool.uv]
+# Declare as a uv workspace member (root pyproject.toml lists apps/engine)
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.26",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    "types-aiofiles>=24.1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["sidecar/tests"]
+addopts = "-ra --strict-markers"
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# Sidecar spec version (bump on schema/env changes — see spec §15)
+[tool.testlyn]
+SIDECAR_SPEC_VERSION = "1.0.0"
