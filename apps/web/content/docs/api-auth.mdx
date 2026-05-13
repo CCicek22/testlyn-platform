@@ -1,0 +1,60 @@
+---
+title: "API Authentication"
+description: "How to authenticate with the Testlyn REST API."
+order: 3
+---
+
+# API Authentication
+
+The Testlyn REST API accepts two authentication methods: Firebase ID tokens (for browser clients) and API keys (for CI/CD and automation).
+
+## API keys
+
+Generate an API key from the **Settings > API keys** page in your dashboard. Keys are prefixed with `tst_` and scoped to your organization.
+
+```bash
+# Pass as a Bearer token
+curl -H "Authorization: Bearer tst_your_api_key_here" \
+  https://api.testlyn.io/v1/tests
+```
+
+API keys have the same permissions as the user who created them, scoped to their organization.
+
+## Firebase ID tokens
+
+If you're calling the API from a browser context where the user is already signed in, pass the Firebase ID token:
+
+```typescript
+import { getAuth } from 'firebase/auth';
+
+const token = await getAuth().currentUser?.getIdToken();
+
+const response = await fetch('https://api.testlyn.io/v1/tests', {
+  headers: { Authorization: `Bearer ${token}` },
+});
+```
+
+ID tokens expire after 1 hour. The Firebase SDK handles refresh automatically for browser clients.
+
+## Errors
+
+| Status | Meaning |
+|--------|---------|
+| `401 Unauthorized` | Missing or invalid token |
+| `403 Forbidden` | Token valid but no permission for this resource |
+| `402 Payment Required` | Quota exceeded for your plan |
+
+All error responses include a JSON body with `detail` and `code` fields:
+
+```json
+{
+  "detail": "Free tier monthly run limit reached (5/5)",
+  "code": "QUOTA_EXCEEDED"
+}
+```
+
+## Rate limits
+
+- 100 requests per minute per API key
+- 20 concurrent runs per organization
+- Run creation is idempotent: pass an `Idempotency-Key` header to retry safely.

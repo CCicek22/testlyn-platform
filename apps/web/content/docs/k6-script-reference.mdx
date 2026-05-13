@@ -1,0 +1,76 @@
+---
+title: "k6 Script Reference"
+description: "What's supported, what's not, and how to write scripts for Testlyn."
+order: 2
+---
+
+# k6 Script Reference
+
+Testlyn runs the official, unmodified `grafana/k6` binary. Any valid k6 script runs here — we don't add extensions, we don't restrict the k6 API.
+
+## What's supported
+
+Everything in stock k6:
+
+- HTTP/1.1 and HTTP/2 (`k6/http`)
+- WebSockets (`k6/ws`)
+- gRPC (`k6/net/grpc`)
+- Checks and thresholds
+- Groups and tags
+- Custom metrics
+- Scenarios (ramping-vus, constant-arrival-rate, etc.)
+- Environment variables via `__ENV`
+- Shared iterations
+
+## Options reference
+
+Common options you'll use:
+
+```javascript
+export const options = {
+  // Simple: fixed VUs for a duration
+  vus: 50,
+  duration: '2m',
+
+  // Or: scenarios for more control
+  scenarios: {
+    ramp_up: {
+      executor: 'ramping-vus',
+      startVUs: 0,
+      stages: [
+        { duration: '1m', target: 100 },
+        { duration: '3m', target: 100 },
+        { duration: '1m', target: 0 },
+      ],
+    },
+  },
+
+  // Thresholds — test fails if not met
+  thresholds: {
+    http_req_duration: ['p(95)<500'],
+    http_req_failed: ['rate<0.01'],
+  },
+};
+```
+
+## Limits per tier
+
+| Tier | Max VUs | Max duration |
+|------|---------|-------------|
+| Free | 50 | 5 min |
+| Hobby | 200 | 30 min |
+| Pro | 1,000 | 2 hr |
+| Business | 5,000 | Unlimited |
+| Enterprise | Unlimited | Unlimited |
+
+If your script exceeds the limit for your tier, the run is rejected before starting with a `402 Payment Required` response.
+
+## What's not supported
+
+- **xk6 extensions** — we run stock k6, no custom extensions. If your script uses an xk6 import, it will fail.
+- **Browser API** — `chromium.launch()` is not supported in Phase 1.
+- **Local file system access** — scripts cannot read files from disk. Inline your data or use `__ENV` for dynamic values.
+
+## Debugging tips
+
+Set `export const options = { vus: 1, duration: '10s' }` when writing your script. Run locally first with `docker run --rm -v $(pwd):/scripts grafana/k6 run /scripts/test.js`. Once it passes locally, paste it into Testlyn.

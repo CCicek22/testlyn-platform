@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Changelog" };
+export const metadata: Metadata = {
+  title: "Changelog",
+  description: "What's new in Testlyn. Real version numbers, real dates.",
+};
 
 const ENTRIES = [
   {
@@ -8,12 +11,20 @@ const ENTRIES = [
     date: "2026-05-12",
     tag: "alpha",
     changes: [
-      "Initial Phase 1 vertical slice: load testing end-to-end.",
-      "k6 + BQ sidecar integration — 1s aggregated metrics streaming.",
-      "Live Recharts dashboard chart on runs page.",
-      "Firebase Auth with Google, GitHub, and email/password.",
-      "Monaco editor for inline k6 scripts.",
-      "Project / test / run CRUD via REST API.",
+      "Phase 1 load testing live — end-to-end vertical slice.",
+      "Stock grafana/k6 runner on GCP Cloud Run Jobs — no proprietary binary, AGPL-safe.",
+      "Python BQ sidecar: 1-second p50/p95/p99 + error rate aggregates streamed to BigQuery.",
+      "Live Recharts dashboard chart: data appears within 5s of run start.",
+      "Firebase Auth: Google, GitHub, and email/password flows.",
+      "Monaco editor for inline k6 script authoring.",
+      "Project / test / test_run CRUD via REST API (FastAPI + SQLAlchemy 2 async).",
+      "Alembic migrations for Postgres schema (Cloud SQL).",
+      "Quota enforcement: Free tier capped at 50 VUs, 5 min, 5 runs/month.",
+      "PDF report stub: run summary exported from WeasyPrint pipeline.",
+      "Stripe Checkout integration in progress (CTAs disabled).",
+      "Terraform IaC: Cloud Run, Cloud SQL, BigQuery, Cloud Tasks, GCS buckets.",
+      "GitHub Actions CI with per-app pipelines and Cloud Build integration.",
+      "Marketing pages: homepage, pricing, docs, blog, changelog, status.",
     ],
   },
 ] as const;
@@ -25,7 +36,7 @@ export default function ChangelogPage() {
         Changelog
       </h1>
       <p className="mb-10 text-zinc-500">
-        What&apos;s new in Testlyn. Dates in YYYY-MM-DD.
+        What&apos;s new in Testlyn. Dates in YYYY-MM-DD. No marketing spin.
       </p>
 
       <div className="space-y-10">
@@ -51,7 +62,10 @@ export default function ChangelogPage() {
             <ul className="space-y-2 text-sm text-zinc-600">
               {entry.changes.map((c) => (
                 <li key={c} className="flex items-start gap-2">
-                  <span className="mt-0.5 text-primary" aria-hidden="true">
+                  <span
+                    className="mt-0.5 shrink-0 text-primary"
+                    aria-hidden="true"
+                  >
                     +
                   </span>
                   {c}

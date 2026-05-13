@@ -1,0 +1,26 @@
+---
+title: "Why we're building Testlyn"
+date: "2026-05-12"
+slug: "why-testlyn"
+description: "A developer's take on what's wrong with existing load testing tools and how Testlyn fixes it."
+---
+
+# Why we're building Testlyn
+
+Every load testing tool I've used falls into one of two categories: open-source with no SaaS around it, or SaaS that makes you call sales before you can see the pricing page.
+
+The open-source path (k6, Locust, Gatling) is great for scripts. It's lousy for everything else. You need to wire up your own metric store, your own dashboards, your own CI hooks, and your own report pipeline. That's easily a week of setup work before you get your first useful number.
+
+The SaaS path fixes the setup problem but creates a new one: vendor lock-in. Grafana Cloud k6 is good software, but it runs a modified k6 binary under the hood. That's an AGPL surface question you probably don't want to think about. Loader.io is cheap but limited. BlazeMeter requires an enterprise conversation before you see a real price.
+
+**Testlyn is neither.**
+
+We run the stock, unmodified `grafana/k6` Docker image — the exact same binary you'd run locally. Your k6 scripts work here without modification. We stay AGPL-safe by streaming metrics out of k6 via a Python sidecar process that reads k6's JSON output format, not by linking or embedding k6 source.
+
+The metrics land in BigQuery in 1-second aggregates. Every run gives you p50, p95, p99, and error rate per second. Not locked in a proprietary format — BigQuery SQL, today.
+
+The daily AI digest means you don't have to babysit your dashboards. At midnight, we run Gemini against your last 24 hours of runs and send you a summary of what changed and why it matters.
+
+That's the whole pitch. If that sounds useful, the free tier is open now.
+
+— The Testlyn team

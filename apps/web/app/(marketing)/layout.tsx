@@ -18,6 +18,9 @@ export default function MarketingLayout({
             <Link href="/docs" className="hover:text-zinc-900 transition-colors">
               Docs
             </Link>
+            <Link href="/blog" className="hover:text-zinc-900 transition-colors">
+              Blog
+            </Link>
             <Link href="/changelog" className="hover:text-zinc-900 transition-colors">
               Changelog
             </Link>
@@ -56,7 +59,9 @@ export default function MarketingLayout({
             </p>
             <nav className="flex gap-4 text-xs text-zinc-400">
               <Link href="/docs" className="hover:text-zinc-600">Docs</Link>
+              <Link href="/blog" className="hover:text-zinc-600">Blog</Link>
               <Link href="/pricing" className="hover:text-zinc-600">Pricing</Link>
+              <Link href="/changelog" className="hover:text-zinc-600">Changelog</Link>
               <Link href="/status" className="hover:text-zinc-600">Status</Link>
             </nav>
           </div>

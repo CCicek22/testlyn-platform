@@ -25,6 +25,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env["NEXT_PUBLIC_API_BASE_URL"] ?? "http://localhost:3000"
   ),
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+  },
 };
 
 export default function RootLayout({

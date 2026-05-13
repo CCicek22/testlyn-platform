@@ -1,0 +1,52 @@
+---
+title: "Why BigQuery for load test metrics"
+date: "2026-05-12"
+slug: "bigquery-streaming-for-load-tests"
+description: "Why we chose BigQuery as the metrics store instead of InfluxDB, Prometheus, or a custom TSDB."
+---
+
+# Why BigQuery for load test metrics
+
+The obvious choice for load test metrics is a time-series database: InfluxDB, Prometheus, TimescaleDB, Victoria Metrics. Every load testing tool has an integration for at least one of these. Why did we choose BigQuery instead?
+
+## The actual query patterns
+
+During a run, you want live data — the latest p95 every second. A TSDB is excellent here.
+
+After a run, the queries change completely. You want:
+
+- "How did p95 change across my last 50 runs on this endpoint?"
+- "Which runs correlated with deployments tagged `backend-v2.3`?"
+- "What's the p99 distribution for runs over 10 minutes vs. under 5 minutes?"
+
+These are analytical queries. They join across runs, they aggregate over long time ranges, they filter on metadata. TSDBs are bad at this. BigQuery is excellent at this — and you can write the query yourself in SQL without learning a proprietary query language.
+
+## The schema
+
+Every metric row in `testlyn_metrics.samples_1s` looks like:
+
+```sql
+run_id        STRING NOT NULL,
+product       STRING NOT NULL,   -- 'load' in Phase 1
+ts            TIMESTAMP NOT NULL,
+vus           INT64,
+rps           FLOAT64,
+p50_ms        FLOAT64,
+p95_ms        FLOAT64,
+p99_ms        FLOAT64,
+error_rate    FLOAT64,
+```
+
+You can query your own data with a standard BigQuery client. The API endpoint proxies queries through our FastAPI layer (for auth and rate limiting), but the schema is yours.
+
+## Cost
+
+BigQuery charges for storage and query bytes scanned. A 10-minute load test generating 1-second aggregates is 600 rows. At aggressive compression, that's a few kilobytes. A year of daily tests costs pennies in storage.
+
+Query costs depend on what you scan. We partition by `ts` and cluster by `run_id`, so most operational queries stay cheap.
+
+## The trade-off we accepted
+
+Streaming to BigQuery has higher write latency than a local TSDB (roughly 200-800ms p95 in our testing). For live dashboard display, we accept this by reading slightly behind real-time — the chart shows data from 2 seconds ago, not now.
+
+For the analytical use case — which is where most of the long-term value lives — BigQuery is unambiguously the right call. Your metrics are in a system your whole data team already knows how to query.

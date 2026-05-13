@@ -1,0 +1,58 @@
+---
+title: "Quickstart"
+description: "Run your first load test on Testlyn in under 5 minutes."
+order: 1
+---
+
+# Quickstart
+
+## 1. Create an account
+
+Go to [testlyn.io/signup](/signup) and create a free account. You get 5 runs per month, up to 50 VUs, 5 minutes max — no credit card required.
+
+After signup, you'll be prompted to create an **organization**. This is the billing unit. One person = one org. Teams share an org.
+
+## 2. Create a project and test
+
+Inside your org dashboard:
+
+1. Click **New project** — give it a name (e.g. `my-api`).
+2. Inside the project, click **New test**.
+3. Paste your k6 script into the editor, or use the sample below.
+
+```javascript
+import http from 'k6/http';
+import { sleep, check } from 'k6';
+
+export const options = {
+  vus: 10,
+  duration: '30s',
+};
+
+export default function () {
+  const res = http.get('https://httpbin.org/get');
+  check(res, { 'status is 200': (r) => r.status === 200 });
+  sleep(1);
+}
+```
+
+## 3. Run the test
+
+Click **Run**. Within 5 seconds, you'll see live p95 latency and error rate in the chart.
+
+When the run completes:
+- The chart freezes at the final data point.
+- A **Download report** button appears — click it to get a PDF summary.
+- If you have a paid plan, a daily AI digest will include this run in tonight's summary.
+
+## 4. Automate via API
+
+Every action in the UI is also available via REST API. See [API Authentication](/docs/api-auth) for how to get an API key.
+
+```bash
+curl -X POST https://api.testlyn.io/v1/tests/YOUR_TEST_ID/runs \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json"
+```
+
+This returns a run object with a `run_id` you can poll for status.
