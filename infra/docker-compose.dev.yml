@@ -1,0 +1,117 @@
+version: "3.9"
+
+# Local dev stack — mirrors GCP services used by Testlyn
+# Start: docker compose -f infra/docker-compose.dev.yml up -d
+# Stop:  docker compose -f infra/docker-compose.dev.yml down -v
+
+services:
+  # ── Postgres 16 ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: testlyn
+      POSTGRES_USER: testlyn_api
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testlyn_api -d testlyn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Redis 7 ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ── BigQuery Emulator ────────────────────────────────────────────────────────
+  bigquery-emulator:
+    image: ghcr.io/goccy/bigquery-emulator:latest
+    command:
+      - --project=example-project-prod
+      - --port=9050
+      - --grpc-port=9060
+    ports:
+      - "127.0.0.1:9050:9050"
+      - "127.0.0.1:9060:9060"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9050/discovery/v1/apis/bigquery/v2/rest | grep -q bigquery || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── BQ Emulator Init Sidecar ─────────────────────────────────────────────────
+  # Seeds dataset testlyn_metrics + both tables so the API and sidecar
+  # can start against an already-provisioned schema.
+  bq-emulator-init:
+    image: google/cloud-sdk:alpine
+    environment:
+      CLOUDSDK_CORE_PROJECT: example-project-prod
+      CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY: "http://bigquery-emulator:9050"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for BQ emulator..."
+        until wget -qO- http://bigquery-emulator:9050/discovery/v1/apis/bigquery/v2/rest | grep -q bigquery; do
+          sleep 2
+        done
+        echo "BQ emulator ready. Creating dataset and tables..."
+
+        # Create dataset
+        bq --api http://bigquery-emulator:9050 \
+           --project_id example-project-prod \
+           mk --dataset \
+           --description "Testlyn metrics" \
+           example-project-prod:testlyn_metrics || true
+
+        # Create samples_1s table
+        bq --api http://bigquery-emulator:9050 \
+           --project_id example-project-prod \
+           mk --table \
+           --time_partitioning_type=DAY \
+           --time_partitioning_field=window_start \
+           --clustering_fields=run_id,metric \
+           example-project-prod:testlyn_metrics.samples_1s \
+           'run_id:STRING,org_id:STRING,product:STRING,region:STRING,window_start:TIMESTAMP,metric:STRING,metric_type:STRING,tag_method:STRING,tag_status:STRING,tag_scenario:STRING,tag_group:STRING,tag_name:STRING,tag_extra:JSON,count:FLOAT64,sum_value:FLOAT64,min_value:FLOAT64,max_value:FLOAT64,p50:FLOAT64,p90:FLOAT64,p95:FLOAT64,p99:FLOAT64,delta:FLOAT64,rate_per_sec:FLOAT64,inserted_at:TIMESTAMP' || true
+
+        # Create runs_summary table
+        bq --api http://bigquery-emulator:9050 \
+           --project_id example-project-prod \
+           mk --table \
+           --time_partitioning_type=DAY \
+           --time_partitioning_field=started_at \
+           --clustering_fields=org_id,run_id \
+           example-project-prod:testlyn_metrics.runs_summary \
+           'run_id:STRING,org_id:STRING,product:STRING,region:STRING,started_at:TIMESTAMP,finished_at:TIMESTAMP,duration_s:FLOAT64,status:STRING,vus:INTEGER,iterations:INTEGER,data_received_bytes:FLOAT64,data_sent_bytes:FLOAT64,checks_passed:FLOAT64,checks_failed:FLOAT64' || true
+
+        echo "BQ emulator init complete."
+    depends_on:
+      bigquery-emulator:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: testlyn-dev
