@@ -5,6 +5,8 @@ from testlyn_api.models.audit_log import AuditLog
 from testlyn_api.models.feature_flag import FeatureFlag
 from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.project import Project
+from testlyn_api.models.runner_registry import RunnerRegistry
+from testlyn_api.models.target import Target
 from testlyn_api.models.test import Test
 from testlyn_api.models.test_run import TestRun
 from testlyn_api.models.usage import UsageRecord
@@ -17,6 +19,8 @@ __all__ = [
     "OrgMember",
     "Organization",
     "Project",
+    "RunnerRegistry",
+    "Target",
     "Test",
     "TestRun",
     "UsageRecord",

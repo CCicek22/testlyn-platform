@@ -6,6 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from testlyn_api.config import get_settings
+from testlyn_api.products.a11y.routes import router as a11y_router
+from testlyn_api.products.a11y.routes import runs_router as a11y_runs_router
+from testlyn_api.products.functional.routes import router as functional_router
 from testlyn_api.routers import (
     auth,
     internal,
@@ -13,6 +16,7 @@ from testlyn_api.routers import (
     projects,
     schedules,
     stream,
+    targets,
     test_runs,
     tests,
     webhooks,
@@ -59,6 +63,10 @@ app.include_router(stream.router)
 app.include_router(webhooks.router)
 app.include_router(schedules.router)
 app.include_router(internal.router)
+app.include_router(targets.router)
+app.include_router(functional_router)
+app.include_router(a11y_router)
+app.include_router(a11y_runs_router)
 
 
 @app.get("/healthz", include_in_schema=False)
