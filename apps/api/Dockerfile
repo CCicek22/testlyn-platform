@@ -25,19 +25,27 @@ COPY apps/api/alembic/ apps/api/alembic/
 RUN uv sync --frozen --no-dev --package testlyn-api
 
 
-FROM gcr.io/distroless/python3-debian12:nonroot
+FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /build/.venv /app/.venv
+# Copy the venv at the SAME path it was built at so the absolute-path shebangs
+# in /build/.venv/bin/* stay valid. Symlink /app/.venv → /build/.venv so the
+# WORKDIR-relative path also resolves.
+COPY --from=builder /build/.venv /build/.venv
+RUN ln -s /build/.venv /app/.venv
+
 COPY --from=builder /build/apps/api/testlyn_api /app/testlyn_api
 COPY --from=builder /build/apps/api/alembic.ini /app/alembic.ini
 COPY --from=builder /build/apps/api/alembic /app/alembic
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/build/.venv/bin:$PATH"
 ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 
+RUN useradd --system --uid 1000 --no-create-home app && chown -R app:app /app /build
+USER app
+
 EXPOSE 8080
 
-CMD ["/app/.venv/bin/uvicorn", "testlyn_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/build/.venv/bin/python", "-m", "uvicorn", "testlyn_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
