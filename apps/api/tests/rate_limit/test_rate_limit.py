@@ -1,14 +1,11 @@
 """Tests for RateLimiter and RateLimitMiddleware."""
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-
 from testlyn_api.core.rate_limit import (
     TIER_RPM,
     RateLimiter,

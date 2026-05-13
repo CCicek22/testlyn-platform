@@ -3,12 +3,12 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, HTTPException, status
 
+from testlyn_api.deps import CurrentUserDep
+from testlyn_api.products.functional._gemini import generate_playwright_script
 from testlyn_api.products.functional.schemas import (
     FunctionalGenerateRequest,
     FunctionalGenerateResponse,
 )
-from testlyn_api.products.functional._gemini import generate_playwright_script
-from testlyn_api.deps import CurrentUserDep
 
 log = structlog.get_logger(__name__)
 
@@ -67,8 +67,9 @@ async def heal_selector(
     Accepts: {screenshot_b64, dom_snapshot, failed_selector, page_url}
     Returns: {new_selector, confidence, reasoning}
     """
-    import httpx
     import os
+
+    import httpx
 
     healer_url = os.getenv("LOCATOR_HEALER_URL", "http://localhost:8090")
 

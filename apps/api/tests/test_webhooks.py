@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.user import User
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
 from testlyn_api.services.webhooks import EVENTS, WebhookDispatcher, _sign
-
 
 # ─── Unit: HMAC helper ────────────────────────────────────────────────────────
 
