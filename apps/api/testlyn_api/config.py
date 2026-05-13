@@ -32,11 +32,16 @@ class Settings(BaseSettings):
 
     # --- Auth ---
     dev_auth_bypass: bool = False
-    # Emails that auto-become owners of the "testlyn-dev" org on first signin.
-    # Empty in tests + prod-proper; set on the dev Cloud Run service env via TF.
-    bootstrap_admin_emails: list[str] = []
+    # Comma-separated emails that auto-become owners of bootstrap_org_slug on
+    # first signin. Empty in tests + prod-proper; set on dev Cloud Run via env.
+    # Stored as string for gcloud --set-env-vars compatibility; split on read.
+    bootstrap_admin_emails_raw: str = ""
     bootstrap_org_slug: str = "testlyn-dev"
     bootstrap_org_name: str = "Testlyn Dev"
+
+    @property
+    def bootstrap_admin_emails(self) -> list[str]:
+        return [e.strip().lower() for e in self.bootstrap_admin_emails_raw.split(",") if e.strip()]
 
     # --- Mode ---
     run_mode: str = "cloud"  # 'cloud' | 'docker'
