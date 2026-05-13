@@ -1,8 +1,8 @@
 """Smoke tests for Phase 4 product scaffolds.
 
 Each product's POST endpoint must return 501 NOT_IMPLEMENTED.
-Each product's runner must declare the correct product discriminator
-and raise NotImplementedError on launch/cancel/status.
+Each product's runner must declare the correct product discriminator,
+raise RunnerNotAvailable on launch, and return safely from cancel/status.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+
+from testlyn_api.core.runner import RunnerNotAvailable
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +55,7 @@ class TestPhase4RunnerDiscriminators:
         ],
     )
     @pytest.mark.asyncio
-    async def test_launch_raises_not_implemented(
+    async def test_launch_raises_runner_not_available(
         self, module_path: str, class_name: str
     ) -> None:
         import importlib
@@ -61,7 +63,7 @@ class TestPhase4RunnerDiscriminators:
         mod = importlib.import_module(module_path)
         cls = getattr(mod, class_name)
         runner = cls()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(RunnerNotAvailable):
             await runner.launch(
                 test_run_id=uuid.uuid4(),
                 script_uri="",
@@ -83,7 +85,7 @@ class TestPhase4RunnerDiscriminators:
         ],
     )
     @pytest.mark.asyncio
-    async def test_cancel_raises_not_implemented(
+    async def test_cancel_returns_safely(
         self, module_path: str, class_name: str
     ) -> None:
         import importlib
@@ -91,8 +93,8 @@ class TestPhase4RunnerDiscriminators:
         mod = importlib.import_module(module_path)
         cls = getattr(mod, class_name)
         runner = cls()
-        with pytest.raises(NotImplementedError):
-            await runner.cancel(runner_id="stub-id")
+        # cancel must not raise
+        await runner.cancel(runner_id="stub-id")
 
     @pytest.mark.parametrize(
         "module_path, class_name",
@@ -112,11 +114,14 @@ class TestPhase4RunnerDiscriminators:
     ) -> None:
         import importlib
 
+        from testlyn_api.core.runner import RunnerStatus
+
         mod = importlib.import_module(module_path)
         cls = getattr(mod, class_name)
         runner = cls()
-        with pytest.raises(NotImplementedError):
-            await runner.status(runner_id="stub-id")
+        result = await runner.status(runner_id="stub-id")
+        assert isinstance(result, RunnerStatus)
+        assert result.state == "unavailable"
 
 
 # ---------------------------------------------------------------------------

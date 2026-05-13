@@ -77,31 +77,24 @@ async def create_recipe(
 
     TODO(W2C): wire Cloud Scheduler creation when schedule_cron is non-null.
     """
-    from sqlalchemy import text
+    import json
+
+    from testlyn_api.models.a11y_audit_recipe import AuditRecipe
 
     recipe_id = uuid.uuid4()
     now = datetime.now(tz=UTC)
     urls_json = [str(u) for u in body.urls]
 
-    await session.execute(
-        text(
-            """
-            INSERT INTO a11y_audit_recipes
-                (id, target_id, urls, max_depth, schedule_cron, created_at, updated_at)
-            VALUES
-                (:id, :target_id, :urls::jsonb, :max_depth, :schedule_cron, :created_at, :updated_at)
-            """
-        ),
-        {
-            "id": recipe_id,
-            "target_id": body.target_id,
-            "urls": __import__("json").dumps(urls_json),
-            "max_depth": body.max_depth,
-            "schedule_cron": body.schedule_cron,
-            "created_at": now,
-            "updated_at": now,
-        },
+    recipe = AuditRecipe(
+        id=recipe_id,
+        target_id=body.target_id,
+        urls=json.dumps(urls_json),
+        max_depth=body.max_depth,
+        schedule_cron=body.schedule_cron,
+        created_at=now,
+        updated_at=now,
     )
+    session.add(recipe)
     await session.commit()
 
     log.info(

@@ -7,6 +7,17 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+class RunnerNotAvailable(Exception):
+    """Raised by Phase 4+ runners whose GA date has not been reached.
+
+    The dispatcher catches this and translates it to HTTP 501.
+    """
+
+    def __init__(self, phase: str = "Phase 4 GA") -> None:
+        self.phase = phase
+        super().__init__(f"Runner not available — {phase}")
+
+
 class RunnerLaunchResult(BaseModel):
     runner_id: str  # e.g. Cloud Run Job execution name
     started_at: datetime

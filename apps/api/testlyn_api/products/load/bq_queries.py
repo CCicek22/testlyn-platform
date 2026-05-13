@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -58,8 +59,8 @@ async def stream_run_metrics(
     )
 
     try:
-        query_job = client.query(sql, job_config=job_config)
-        rows = query_job.result()
+        query_job = await asyncio.to_thread(client.query, sql, job_config=job_config)
+        rows = await asyncio.to_thread(query_job.result)
     except Exception as exc:
         log.error("bq_queries.query_failed", run_id=str(run_id), error=str(exc))
         return []

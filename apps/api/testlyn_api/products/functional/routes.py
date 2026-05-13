@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+
 import structlog
 from fastapi import APIRouter, HTTPException, status
 
+from testlyn_api.config import get_settings
+from testlyn_api.core.cache import get_redis
 from testlyn_api.deps import CurrentUserDep
 from testlyn_api.products.functional._gemini import generate_playwright_script
 from testlyn_api.products.functional.schemas import (
@@ -67,11 +71,10 @@ async def heal_selector(
     Accepts: {screenshot_b64, dom_snapshot, failed_selector, page_url}
     Returns: {new_selector, confidence, reasoning}
     """
-    import os
-
     import httpx
 
-    healer_url = os.getenv("LOCATOR_HEALER_URL", "http://localhost:8090")
+    settings = get_settings()
+    healer_url = settings.locator_healer_url
 
     required = {"screenshot_b64", "dom_snapshot", "failed_selector", "page_url"}
     missing = required - body.keys()
@@ -81,11 +84,27 @@ async def heal_selector(
             detail=f"Missing fields: {sorted(missing)}",
         )
 
+    # Cache key: sha256 of (failed_selector + dom_snapshot), truncated to 32 hex chars
+    cache_key = "heal:" + hashlib.sha256(
+        (body.get("failed_selector", "") + body.get("dom_snapshot", "")).encode()
+    ).hexdigest()[:32]
+    redis = get_redis()
+
+    cached = await redis.get(cache_key)
+    if cached:
+        import json
+
+        log.info("functional.heal_cache_hit", cache_key=cache_key)
+        return json.loads(cached)
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(f"{healer_url}/heal", json=body)
             resp.raise_for_status()
-            return resp.json()
+            result = resp.json()
+
+        await redis.set(cache_key, __import__("json").dumps(result), ex=86400)
+        return result
     except httpx.HTTPStatusError as exc:
         log.error("functional.heal_proxy_error", status=exc.response.status_code)
         raise HTTPException(

@@ -10,6 +10,7 @@ import structlog
 
 from testlyn_api.config import get_settings
 from testlyn_api.core.runner import RunnerLaunchResult, RunnerStatus
+from testlyn_api.core.runner_state import execution_to_status
 
 log = structlog.get_logger(__name__)
 
@@ -81,21 +82,7 @@ class K6Runner:
         client = run_v2.JobsAsyncClient()
         execution = await client.get_execution(name=runner_id)
 
-        state_map = {
-            run_v2.Execution.ExecutionStatus.EXECUTION_STATUS_UNSPECIFIED: "queued",
-            run_v2.Execution.ExecutionStatus.ACTIVE: "running",
-            run_v2.Execution.ExecutionStatus.SUCCEEDED: "completed",
-            run_v2.Execution.ExecutionStatus.FAILED: "failed",
-            run_v2.Execution.ExecutionStatus.CANCELLED: "cancelled",
-        }
-        state = state_map.get(execution.reconciling, "queued")
-
-        return RunnerStatus(
-            state=state,
-            started_at=execution.start_time,
-            finished_at=execution.completion_time,
-            exit_reason=None,
-        )
+        return execution_to_status(execution)
 
     # ------------------------------------------------------------------
     # Private helpers

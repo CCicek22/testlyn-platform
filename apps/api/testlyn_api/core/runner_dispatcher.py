@@ -5,10 +5,12 @@ import uuid
 from typing import Any
 
 import structlog
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.config import get_settings
+from testlyn_api.core.runner import RunnerNotAvailable
 from testlyn_api.models.runner_registry import RunnerRegistry
 
 log = structlog.get_logger(__name__)
@@ -51,7 +53,17 @@ class RunnerDispatcher:
         )
 
         if settings.run_mode == "docker":
-            await self._dispatch_docker(test_run_id)
+            try:
+                await self._dispatch_docker(test_run_id)
+            except RunnerNotAvailable as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                    detail={
+                        "code": "NOT_IMPLEMENTED",
+                        "available_in": exc.phase,
+                        "product": product,
+                    },
+                ) from exc
             return "docker"
 
         queue_name = f"testlyn-runs-{product}"

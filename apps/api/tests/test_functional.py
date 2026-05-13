@@ -103,6 +103,7 @@ class TestSchemas:
             locator_strategies=["data-testid", "ARIA"],
         )
         assert len(resp.locator_strategies) == 2
+        assert resp.product == "functional"
 
 
 # ---------------------------------------------------------------------------

@@ -11,8 +11,11 @@ import structlog
 
 from testlyn_api.config import get_settings
 from testlyn_api.core.runner import RunnerLaunchResult, RunnerStatus
+from testlyn_api.core.runner_state import execution_to_status
 
 log = structlog.get_logger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
 
 # Canned response when schemathesis binary is unavailable
 _CANNED_REPORT: dict[str, Any] = {
@@ -78,21 +81,7 @@ class ApiContractRunner:
         client = run_v2.JobsAsyncClient()
         execution = await client.get_execution(name=runner_id)
 
-        state_map = {
-            run_v2.Execution.ExecutionStatus.EXECUTION_STATUS_UNSPECIFIED: "queued",
-            run_v2.Execution.ExecutionStatus.ACTIVE: "running",
-            run_v2.Execution.ExecutionStatus.SUCCEEDED: "completed",
-            run_v2.Execution.ExecutionStatus.FAILED: "failed",
-            run_v2.Execution.ExecutionStatus.CANCELLED: "cancelled",
-        }
-        state = state_map.get(execution.reconciling, "queued")
-
-        return RunnerStatus(
-            state=state,
-            started_at=execution.start_time,
-            finished_at=execution.completion_time,
-            exit_reason=None,
-        )
+        return execution_to_status(execution)
 
     # ------------------------------------------------------------------
     # Private
@@ -137,15 +126,36 @@ class ApiContractRunner:
 
         log.info("api_contract_runner.subprocess_launch", run_id=str(test_run_id), cmd=cmd)
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            await proc.communicate()
-        except Exception as exc:
-            log.error("api_contract_runner.subprocess_error", run_id=str(test_run_id), error=str(exc))
+        settings = get_settings()
+        callback_url = f"{settings.api_base_url}/v1/internal/runs/{test_run_id}/complete"
+
+        async def _run_and_callback() -> None:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                _stdout, _stderr = await proc.communicate()
+                log.info(
+                    "api_contract_runner.subprocess_finished",
+                    run_id=str(test_run_id),
+                    exit_code=proc.returncode,
+                )
+                import httpx
+
+                async with httpx.AsyncClient() as http:
+                    await http.post(
+                        callback_url,
+                        json={"exit_code": proc.returncode or 0},
+                        timeout=10,
+                    )
+            except Exception as exc:
+                log.error("api_contract_runner.subprocess_error", run_id=str(test_run_id), error=str(exc))
+
+        _task = asyncio.create_task(_run_and_callback())
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
 
         return RunnerLaunchResult(
             runner_id=f"contract-subprocess-{test_run_id}",

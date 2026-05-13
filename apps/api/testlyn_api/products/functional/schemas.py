@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -23,5 +25,6 @@ class FunctionalGenerateRequest(BaseModel):
 class FunctionalGenerateResponse(BaseModel):
     """Response from AI test script generation."""
 
+    product: Literal["functional"] = "functional"
     script_ts: str
     locator_strategies: list[str]

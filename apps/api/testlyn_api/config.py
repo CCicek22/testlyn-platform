@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # --- k6 ---
     k6_image_tag: str = "grafana/k6:1.3.0"
 
+    # --- Functional / Locator Healer ---
+    locator_healer_url: str = "http://localhost:8090"
+
     # --- SSE ---
     sse_heartbeat_interval: float = 10.0
     # 0 = unlimited (production default); set to a small number in tests to cap stream length

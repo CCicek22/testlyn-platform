@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from testlyn_api.core.runner import RunnerLaunchResult, RunnerStatus
+from testlyn_api.core.runner import RunnerLaunchResult, RunnerNotAvailable, RunnerStatus
 
 
 class CicdInsightsRunner:
@@ -19,10 +19,15 @@ class CicdInsightsRunner:
         duration_seconds: int,
         env: dict[str, str],
     ) -> RunnerLaunchResult:
-        raise NotImplementedError("Coming soon — Phase 4 GA")
+        raise RunnerNotAvailable("Phase 4 GA")
 
     async def cancel(self, *, runner_id: str) -> None:
-        raise NotImplementedError("Coming soon — Phase 4 GA")
+        return
 
     async def status(self, *, runner_id: str) -> RunnerStatus:
-        raise NotImplementedError("Coming soon — Phase 4 GA")
+        return RunnerStatus(
+            state="unavailable",
+            started_at=None,
+            finished_at=None,
+            exit_reason="Phase 4 not available",
+        )
