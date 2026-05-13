@@ -51,6 +51,7 @@ addopts = "-ra --strict-markers"
 strict = true
 python_version = "3.13"
 ignore_missing_imports = true
+exclude = ["sidecar/tests/"]
 
 [tool.ruff]
 target-version = "py313"

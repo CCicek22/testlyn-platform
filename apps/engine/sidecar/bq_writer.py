@@ -114,7 +114,7 @@ class BQWriter:
         started_at: datetime,
         finished_at: datetime,
         status: str,
-        summary_json: dict | None = None,
+        summary_json: dict[str, Any] | None = None,
     ) -> None:
         """Write a single row to the runs_summary table."""
         row = {

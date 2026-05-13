@@ -340,5 +340,5 @@ class WindowAggregator:
             tag_group=indexed.get("group") or None,
             tag_name=indexed.get("name") or None,
             tag_extra=extra,
-            **stats,  # type: ignore[arg-type]
+            **stats,
         )

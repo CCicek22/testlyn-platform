@@ -40,9 +40,9 @@ class PdfResult:
 # ---------------------------------------------------------------------------
 
 
-def _apply_theme(ax: plt.Axes) -> None:
+def _apply_theme(ax: Any) -> None:
     ax.set_facecolor("#111113")
-    ax.figure.set_facecolor("#111113")  # type: ignore[union-attr]
+    ax.figure.set_facecolor("#111113")
     ax.tick_params(colors="#9CA3AF", labelsize=9, labelcolor="#9CA3AF")
     ax.xaxis.label.set_color("#9CA3AF")
     ax.yaxis.label.set_color("#9CA3AF")
@@ -53,7 +53,7 @@ def _apply_theme(ax: plt.Axes) -> None:
     ax.grid(color="#1F2937", linestyle="--", linewidth=0.6)
 
 
-def _fig_to_b64(fig: plt.Figure) -> str:
+def _fig_to_b64(fig: Any) -> str:
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
     buf.seek(0)

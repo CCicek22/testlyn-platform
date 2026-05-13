@@ -33,3 +33,9 @@ packages = ["report_builder"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+ignore_missing_imports = true
+exclude = ["tests/"]
