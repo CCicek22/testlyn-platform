@@ -26,7 +26,6 @@ from typing import Any
 
 import aiofiles
 import structlog
-
 from sidecar.parsers.base import SampleEvent
 
 log = structlog.get_logger(__name__)
