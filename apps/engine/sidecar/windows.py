@@ -174,6 +174,12 @@ class _WindowBucket:
 
     def close(self, window_seconds: float = 1.0) -> dict:  # type: ignore[type-arg]
         """Return the aggregated stats dict (used to build WindowSample)."""
+        # rate_per_sec semantics (spec §6): for 'rate' metrics, emit the count of
+        # successful observations per second in this window (successes / window_s).
+        # This is NOT a dimensionless fraction (0-1); it is an absolute rate in
+        # units of [events/second].  BQ consumers that want a success fraction
+        # should compute (rate_per_sec * window_s) / count themselves.
+        # Decision recorded here to prevent future drift. — R1-C1 2026-05-13
         rate: float | None = None
         if self.metric_type == "rate" and self._rate_total > 0:
             rate = self._rate_success / window_seconds
