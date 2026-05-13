@@ -1,0 +1,1299 @@
+openapi: 3.1.0
+info:
+  title: Testlyn API
+  version: 1.0.0
+  contact:
+    name: Testlyn Support
+    email: support@testlyn.io
+    url: https://testlyn.io/docs/api/v1
+  license:
+    name: Proprietary
+    url: https://testlyn.io/legal/terms
+  x-export-warning: 'Partial spec — some routers excluded due to import error. Fix
+    root cause: Invalid args for response field! Hint: check that <class ''sqlalchemy.ext.asyncio.session.AsyncSession''>
+    is a valid Pydantic field type. If you are using a return type annotation that
+    is not a valid Pydantic field (e.g. Union[Response, dict, None]) you can disable
+    generating the response model from the type annotation with the path operation
+    decorator parameter response_model=None. Read more: https://fastapi.tiangolo.com/tutorial/response-model/'
+paths:
+  /v1/me:
+    get:
+      tags:
+      - auth
+      summary: Get Me
+      operationId: get_me_v1_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserOut'
+  /v1/orgs:
+    post:
+      tags:
+      - orgs
+      summary: Create Org
+      operationId: create_org_v1_orgs_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/orgs/{org_id}:
+    get:
+      tags:
+      - orgs
+      summary: Get Org
+      operationId: get_org_v1_orgs__org_id__get
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Org Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/orgs/{org_id}/invites:
+    post:
+      tags:
+      - orgs
+      summary: Create Invite
+      operationId: create_invite_v1_orgs__org_id__invites_post
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Org Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/orgs/{org_id}/projects:
+    get:
+      tags:
+      - orgs
+      summary: List Projects
+      operationId: list_projects_v1_orgs__org_id__projects_get
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Org Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Projects V1 Orgs  Org Id  Projects Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - projects
+      summary: Create Project
+      operationId: create_project_v1_orgs__org_id__projects_post
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Org Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/projects/{project_id}/tests:
+    get:
+      tags:
+      - tests
+      summary: List Tests
+      operationId: list_tests_v1_projects__project_id__tests_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TestOut'
+                title: Response List Tests V1 Projects  Project Id  Tests Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - tests
+      summary: Create Test
+      operationId: create_test_v1_projects__project_id__tests_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/tests/{test_id}:
+    get:
+      tags:
+      - tests
+      summary: Get Test
+      operationId: get_test_v1_tests__test_id__get
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Test Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - tests
+      summary: Patch Test
+      operationId: patch_test_v1_tests__test_id__patch
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Test Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/tests/{test_id}/runs:
+    post:
+      tags:
+      - test-runs
+      summary: Create Run
+      operationId: create_run_v1_tests__test_id__runs_post
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Test Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/runs/{run_id}:
+    get:
+      tags:
+      - test-runs
+      summary: Get Run
+      operationId: get_run_v1_runs__run_id__get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/runs/{run_id}/stream:
+    get:
+      tags:
+      - stream
+      summary: Stream Run
+      operationId: stream_run_v1_runs__run_id__stream_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/webhooks/stripe:
+    post:
+      tags:
+      - webhooks
+      summary: Stripe Webhook
+      description: Verify and dispatch Stripe webhook events.
+      operationId: stripe_webhook_v1_webhooks_stripe_post
+      parameters:
+      - name: stripe-signature
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Stripe-Signature
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/tests/{test_id}/schedule:
+    post:
+      tags:
+      - schedules
+      summary: Create Schedule
+      operationId: create_schedule_v1_tests__test_id__schedule_post
+      parameters:
+      - name: test_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Test Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/schedules/{schedule_id}:
+    delete:
+      tags:
+      - schedules
+      summary: Delete Schedule
+      operationId: delete_schedule_v1_schedules__schedule_id__delete
+      parameters:
+      - name: schedule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schedule Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/schedules:
+    get:
+      tags:
+      - schedules
+      summary: List Schedules
+      operationId: list_schedules_v1_schedules_get
+      parameters:
+      - name: org_id
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Org Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ScheduleOut'
+                title: Response List Schedules V1 Schedules Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/orgs/{org_id}/targets:
+    get:
+      tags:
+      - targets
+      summary: List Targets
+      operationId: list_targets_v1_orgs__org_id__targets_get
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Org Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Limit
+      - name: after
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: After
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetListOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - targets
+      summary: Create Target
+      operationId: create_target_v1_orgs__org_id__targets_post
+      parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Org Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/targets/{target_id}:
+    get:
+      tags:
+      - targets
+      summary: Get Target
+      operationId: get_target_v1_targets__target_id__get
+      parameters:
+      - name: target_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Target Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - targets
+      summary: Update Target
+      operationId: update_target_v1_targets__target_id__patch
+      parameters:
+      - name: target_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Target Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TargetUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - targets
+      summary: Delete Target
+      operationId: delete_target_v1_targets__target_id__delete
+      parameters:
+      - name: target_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Target Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/internal/runs/{run_id}/start:
+    post:
+      tags:
+      - internal
+      summary: Start Run
+      operationId: start_run_v1_internal_runs__run_id__start_post
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/internal/runs/{run_id}/complete:
+    post:
+      tags:
+      - internal
+      summary: Complete Run
+      operationId: complete_run_v1_internal_runs__run_id__complete_post
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCompletePayload'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InviteCreate:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        role:
+          type: string
+          title: Role
+          default: member
+      type: object
+      required:
+      - email
+      title: InviteCreate
+    InviteOut:
+      properties:
+        org_id:
+          type: string
+          format: uuid
+          title: Org Id
+        email:
+          type: string
+          title: Email
+        role:
+          type: string
+          title: Role
+        message:
+          type: string
+          title: Message
+          default: Invite recorded (email delivery stubbed for Phase 1)
+      type: object
+      required:
+      - org_id
+      - email
+      - role
+      title: InviteOut
+    OrgCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - name
+      title: OrgCreate
+    OrgMembershipOut:
+      properties:
+        org_id:
+          type: string
+          format: uuid
+          title: Org Id
+        role:
+          type: string
+          title: Role
+      type: object
+      required:
+      - org_id
+      - role
+      title: OrgMembershipOut
+    OrgOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        slug:
+          type: string
+          title: Slug
+        plan:
+          type: string
+          title: Plan
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - name
+      - slug
+      - plan
+      - created_at
+      title: OrgOut
+    ProjectCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - name
+      title: ProjectCreate
+    ProjectOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        org_id:
+          type: string
+          format: uuid
+          title: Org Id
+        name:
+          type: string
+          title: Name
+        slug:
+          type: string
+          title: Slug
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - org_id
+      - name
+      - slug
+      - created_at
+      title: ProjectOut
+    RunCompletePayload:
+      properties:
+        exit_code:
+          type: integer
+          title: Exit Code
+        summary_uri:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary Uri
+        error_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Reason
+      type: object
+      required:
+      - exit_code
+      title: RunCompletePayload
+    RunCreate:
+      properties: {}
+      type: object
+      title: RunCreate
+    RunOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        test_id:
+          type: string
+          format: uuid
+          title: Test Id
+        product:
+          type: string
+          title: Product
+        state:
+          type: string
+          title: State
+        runner_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Runner Id
+        region:
+          type: string
+          title: Region
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        summary_uri:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary Uri
+        error_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Reason
+        triggered_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Triggered By
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - test_id
+      - product
+      - state
+      - runner_id
+      - region
+      - started_at
+      - finished_at
+      - summary_uri
+      - error_reason
+      - triggered_by
+      - created_at
+      - updated_at
+      title: RunOut
+    ScheduleCreate:
+      properties:
+        cron:
+          type: string
+          title: Cron
+        timezone:
+          type: string
+          title: Timezone
+          default: UTC
+      type: object
+      required:
+      - cron
+      title: ScheduleCreate
+    ScheduleOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        test_id:
+          type: string
+          title: Test Id
+        org_id:
+          type: string
+          title: Org Id
+        cron:
+          type: string
+          title: Cron
+        timezone:
+          type: string
+          title: Timezone
+        local:
+          type: boolean
+          title: Local
+      type: object
+      required:
+      - id
+      - test_id
+      - org_id
+      - cron
+      - timezone
+      - local
+      title: ScheduleOut
+    TargetCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        kind:
+          $ref: '#/components/schemas/TargetKind'
+        base_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Base Url
+        auth_config:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Auth Config
+      type: object
+      required:
+      - name
+      - kind
+      title: TargetCreate
+    TargetKind:
+      type: string
+      enum:
+      - web
+      - mobile
+      - api
+      title: TargetKind
+    TargetListOut:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TargetOut'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        cursor:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Cursor
+      type: object
+      required:
+      - items
+      - total
+      - cursor
+      title: TargetListOut
+    TargetOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        org_id:
+          type: string
+          format: uuid
+          title: Org Id
+        name:
+          type: string
+          title: Name
+        kind:
+          $ref: '#/components/schemas/TargetKind'
+        base_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Base Url
+        auth_config:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Auth Config
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - org_id
+      - name
+      - kind
+      - base_url
+      - auth_config
+      - created_at
+      - updated_at
+      title: TargetOut
+    TargetUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        kind:
+          anyOf:
+          - $ref: '#/components/schemas/TargetKind'
+          - type: 'null'
+        base_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Base Url
+        auth_config:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Auth Config
+      type: object
+      title: TargetUpdate
+    TestConfig:
+      properties:
+        vus:
+          type: integer
+          title: Vus
+          default: 1
+        duration_seconds:
+          type: integer
+          title: Duration Seconds
+          default: 30
+        thresholds:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
+          title: Thresholds
+          default: {}
+      type: object
+      title: TestConfig
+    TestCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        product:
+          type: string
+          title: Product
+          default: load
+        script_inline:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Script Inline
+        config:
+          $ref: '#/components/schemas/TestConfig'
+          default:
+            vus: 1
+            duration_seconds: 30
+            thresholds: {}
+      type: object
+      required:
+      - name
+      title: TestCreate
+    TestOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        name:
+          type: string
+          title: Name
+        product:
+          type: string
+          title: Product
+        script_uri:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Script Uri
+        script_inline:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Script Inline
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        created_by:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Created By
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - project_id
+      - name
+      - product
+      - script_uri
+      - script_inline
+      - config
+      - created_by
+      - created_at
+      - updated_at
+      title: TestOut
+    TestPatch:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        script_inline:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Script Inline
+        config:
+          anyOf:
+          - $ref: '#/components/schemas/TestConfig'
+          - type: 'null'
+      type: object
+      title: TestPatch
+    UserOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          title: Email
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        avatar_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Avatar Url
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        memberships:
+          items:
+            $ref: '#/components/schemas/OrgMembershipOut'
+          type: array
+          title: Memberships
+          default: []
+      type: object
+      required:
+      - id
+      - email
+      - name
+      - avatar_url
+      - created_at
+      title: UserOut
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+servers:
+- url: https://api.testlyn.io/v1
+  description: Production
+- url: http://localhost:8080/v1
+  description: Local development

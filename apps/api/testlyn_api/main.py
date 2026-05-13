@@ -6,11 +6,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from testlyn_api.config import get_settings
+from testlyn_api.core.rate_limit import RateLimitMiddleware
 from testlyn_api.products.a11y.routes import router as a11y_router
 from testlyn_api.products.a11y.routes import runs_router as a11y_runs_router
+from testlyn_api.products.api_contract.routes import router as api_contract_router
 from testlyn_api.products.functional.routes import router as functional_router
+from testlyn_api.products.security.routes import router as security_router
+from testlyn_api.products.synthetic_data.routes import router as synthetic_data_router
 from testlyn_api.routers import (
+    audit,
     auth,
+    insights,
     internal,
     orgs,
     projects,
@@ -20,6 +26,7 @@ from testlyn_api.routers import (
     test_runs,
     tests,
     webhooks,
+    webhooks_admin,
 )
 
 structlog.configure(
@@ -53,6 +60,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Rate limiting for /v1/ routes — must be added after CORS so CORS headers are
+# present even on 429 responses.  The middleware self-filters to /v1/ paths.
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(auth.router)
 app.include_router(orgs.router)
@@ -67,6 +77,12 @@ app.include_router(targets.router)
 app.include_router(functional_router)
 app.include_router(a11y_router)
 app.include_router(a11y_runs_router)
+app.include_router(webhooks_admin.router)
+app.include_router(audit.router)
+app.include_router(synthetic_data_router)
+app.include_router(api_contract_router)
+app.include_router(security_router)
+app.include_router(insights.router)
 
 
 @app.get("/healthz", include_in_schema=False)
