@@ -23,7 +23,8 @@ async def list_tests(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> list[TestOut]:
-    await _get_project_or_404(project_id, session)
+    project = await _get_project_or_404(project_id, session)
+    await _enforce_perm("read", "test", user_id=current_user.id, org_id=project.org_id, project_id=project_id, session=session)
     result = await session.execute(select(Test).where(Test.project_id == project_id))
     return [TestOut.model_validate(t) for t in result.scalars().all()]
 
@@ -71,6 +72,8 @@ async def get_test(
     session: SessionDep,
 ) -> TestOut:
     test = await _get_test_or_404(test_id, session)
+    project = await _get_project_or_404(test.project_id, session)
+    await _enforce_perm("read", "test", user_id=current_user.id, org_id=project.org_id, project_id=test.project_id, session=session)
     return TestOut.model_validate(test)
 
 
@@ -82,6 +85,8 @@ async def patch_test(
     session: SessionDep,
 ) -> TestOut:
     test = await _get_test_or_404(test_id, session)
+    project = await _get_project_or_404(test.project_id, session)
+    await _enforce_perm("write", "test", user_id=current_user.id, org_id=project.org_id, project_id=test.project_id, session=session)
 
     if body.name is not None:
         test.name = body.name

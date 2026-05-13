@@ -7,6 +7,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.schemas.org import InviteCreate, InviteOut, OrgCreate, OrgOut
@@ -59,7 +60,7 @@ async def create_invite(
     session: SessionDep,
 ) -> InviteOut:
     await _get_org_or_404(org_id, session)
-    await _assert_member(org_id, current_user.id, session)
+    await _enforce_perm("manage_members", "org", user_id=current_user.id, org_id=org_id, session=session)
     # Phase 1: stub — write nothing, no email sent
     log.info("org.invite_stub", org_id=str(org_id), email=body.email, role=body.role)
     return InviteOut(org_id=org_id, email=body.email, role=body.role)
