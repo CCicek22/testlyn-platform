@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from testlyn_api.config import get_settings
+from testlyn_api.core.ip_allowlist import IPAllowlistMiddleware
 from testlyn_api.core.rate_limit import RateLimitMiddleware
 from testlyn_api.products.a11y.routes import router as a11y_router
 from testlyn_api.products.a11y.routes import runs_router as a11y_runs_router
@@ -23,11 +24,14 @@ from testlyn_api.products.visual.routes import router as visual_router
 from testlyn_api.routers import (
     audit,
     auth,
+    enterprise,
     insights,
     internal,
     orgs,
     projects,
     schedules,
+    scim,
+    sso,
     stream,
     targets,
     test_runs,
@@ -70,6 +74,9 @@ app.add_middleware(
 # Rate limiting for /v1/ routes — must be added after CORS so CORS headers are
 # present even on 429 responses.  The middleware self-filters to /v1/ paths.
 app.add_middleware(RateLimitMiddleware)
+# IP allowlist enforcement — rejects /v1/ requests from IPs outside the org's
+# configured CIDRs.  Off by default (no entries = allow-all).
+app.add_middleware(IPAllowlistMiddleware)
 
 app.include_router(auth.router)
 app.include_router(orgs.router)
@@ -97,6 +104,9 @@ app.include_router(tdm_router)
 app.include_router(qa_maturity_router)
 app.include_router(eng_analytics_router)
 app.include_router(cicd_insights_router)
+app.include_router(sso.router)
+app.include_router(scim.router)
+app.include_router(enterprise.router)
 
 
 @app.get("/healthz", include_in_schema=False)
