@@ -16,7 +16,7 @@ export type RunState =
   | "error"
   | "cancelled";
 
-export type TestProduct = "load"; // Phase 1 only. Phase 2+: 'functional' | 'a11y' | ...
+export type TestProduct = "load" | "functional" | "a11y"; // Phase 1: load. Phase 2+: functional, a11y
 
 // ─── Core entities ────────────────────────────────────────────────────────────
 
@@ -157,3 +157,50 @@ export type SSEEventPayload =
   | { type: "sample"; data: LiveSample }
   | { type: "state"; data: RunStateEvent }
   | { type: "done" };
+
+// ─── Phase 2: Target entity ───────────────────────────────────────────────────
+
+export type TargetKind = "web" | "mobile" | "api";
+
+export interface Target {
+  id: string;
+  org_id: string;
+  name: string;
+  kind: TargetKind;
+  base_url: string;
+  auth_config: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Phase 2: Runner registry ─────────────────────────────────────────────────
+
+export interface RunnerRegistryEntry {
+  name: string; // PK
+  product: TestProduct;
+  image_uri: string;
+  cpu: string;
+  memory_mb: number;
+  capabilities: Record<string, unknown>;
+}
+
+// ─── Phase 2: Functional run shape ───────────────────────────────────────────
+
+export interface FunctionalRunSummary {
+  run_id: string;
+  tests_passed: number;
+  tests_failed: number;
+  tests_healed: number;
+  duration_ms: number;
+}
+
+// ─── Phase 2: A11y run shape ──────────────────────────────────────────────────
+
+export interface A11yRunSummary {
+  run_id: string;
+  urls_scanned: number;
+  violations_critical: number;
+  violations_serious: number;
+  violations_moderate: number;
+  violations_minor: number;
+}

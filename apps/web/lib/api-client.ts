@@ -104,6 +104,10 @@ export const api = {
 
   runs: {
     get: (id: string) => request<TestRun>(`/v1/runs/${id}`),
+    list: (product: string, limit = 50) =>
+      request<TestRun[]>(`/v1/runs?product=${product}&limit=${limit}`),
+    summary: (id: string, product: string) =>
+      request<unknown>(`/v1/runs/${id}/summary?product=${product}`),
     cancel: (id: string) =>
       request<void>(`/v1/runs/${id}/cancel`, { method: "POST" }),
     streamUrl: (id: string) => `${BASE_URL}/v1/runs/${id}/stream`,

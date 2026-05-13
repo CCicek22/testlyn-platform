@@ -7,6 +7,7 @@ import { LogoPulse } from "@/components/brand/logo-pulse";
 import { useAuth } from "@/components/auth/auth-provider";
 import { signOutUser } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
+import { ProductSwitcher } from "@/components/nav/product-switcher";
 
 const NAV_ITEMS = [
   {
@@ -83,6 +84,10 @@ export default function DashboardLayout({
               active={pathname.startsWith(item.href)}
             />
           ))}
+
+          <div className="mt-3 border-t border-zinc-800 pt-3">
+            <ProductSwitcher />
+          </div>
         </nav>
 
         {/* User menu */}

@@ -25,6 +25,8 @@
   --color-light: #fafafa;
 
   --color-accent-load: #3730a3;
+  --color-accent-functional: #8b5cf6;
+  --color-accent-a11y: #14b8a6;
 
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -72,4 +74,22 @@ pre,
 .font-mono {
   font-family: var(--font-mono);
   font-feature-settings: "liga" 1, "calt" 1;
+}
+
+/* ── Product accent CSS vars ──────────────────────────────────────────── */
+
+:root {
+  --accent-current: #3730a3;
+}
+
+[data-product="load"] {
+  --accent-current: #3730a3;
+}
+
+[data-product="functional"] {
+  --accent-current: #8b5cf6;
+}
+
+[data-product="a11y"] {
+  --accent-current: #14b8a6;
 }
