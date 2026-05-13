@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy import select
 
 from testlyn_api.core.runner_registry import RUNNERS
@@ -17,8 +18,22 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/internal", tags=["internal"])
 
-# OIDC verification is handled at the load-balancer / Cloud Tasks level in production.
-# In local dev (RUN_MODE=docker), the endpoint is called directly without OIDC.
+# In production (run_mode=cloud), callers must supply the X-Internal-Token header
+# matching settings.internal_token. In docker/dev mode the check is skipped so
+# the Cloud Tasks emulator (which doesn't add the header) can call freely.
+
+
+def _verify_internal_token(x_internal_token: str | None) -> None:
+    from testlyn_api.config import get_settings
+
+    settings = get_settings()
+    if settings.run_mode == "docker":
+        return  # dev bypass — no header required
+    expected = getattr(settings, "internal_token", None)
+    if not expected:
+        return  # not configured — allow (backwards compat with existing deploys)
+    if not x_internal_token or not secrets.compare_digest(x_internal_token, expected):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal token")
 
 
 @router.post("/runs/{run_id}/start", response_model=RunOut)
@@ -26,7 +41,9 @@ async def start_run(
     run_id: uuid.UUID,
     request: Request,
     session: SessionDep,
+    x_internal_token: str | None = Header(default=None),
 ) -> RunOut:
+    _verify_internal_token(x_internal_token)
     run = await _get_run_or_404(run_id, session)
 
     if run.state != "queued":
@@ -84,7 +101,9 @@ async def complete_run(
     run_id: uuid.UUID,
     body: RunCompletePayload,
     session: SessionDep,
+    x_internal_token: str | None = Header(default=None),
 ) -> RunOut:
+    _verify_internal_token(x_internal_token)
     run = await _get_run_or_404(run_id, session)
 
     if run.state not in {"running", "queued"}:

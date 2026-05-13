@@ -96,7 +96,9 @@ async def _load_cidrs(org_id: str) -> list[str]:
         return cached[0]
 
     try:
-        from sqlalchemy import select, text
+        import uuid as _uuid
+
+        from sqlalchemy import select
 
         from testlyn_api.core.db import _session_factory
         from testlyn_api.models.org_ip_allowlist import OrgIpAllowlist
@@ -104,7 +106,7 @@ async def _load_cidrs(org_id: str) -> list[str]:
         async with _session_factory() as session:
             result = await session.execute(
                 select(OrgIpAllowlist.cidr).where(
-                    OrgIpAllowlist.org_id == text(f"'{org_id}'::uuid"),
+                    OrgIpAllowlist.org_id == _uuid.UUID(org_id),
                     OrgIpAllowlist.active.is_(True),
                 )
             )
