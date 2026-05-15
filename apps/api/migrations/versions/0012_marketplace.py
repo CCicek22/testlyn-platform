@@ -113,8 +113,8 @@ def upgrade() -> None:
             ON CONFLICT (slug) DO NOTHING
             """
         ).bindparams(
-            id1=str(uuid.uuid4()),
-            id2=str(uuid.uuid4()),
+            sa.bindparam("id1", uuid.uuid4(), type_=postgresql.UUID(as_uuid=True)),
+            sa.bindparam("id2", uuid.uuid4(), type_=postgresql.UUID(as_uuid=True)),
         )
     )
 
@@ -141,10 +141,10 @@ def upgrade() -> None:
             ON CONFLICT (slug) DO NOTHING
             """
         ).bindparams(
-            id1=str(uuid.uuid4()),
-            id2=str(uuid.uuid4()),
-            id3=str(uuid.uuid4()),
-            id4=str(uuid.uuid4()),
+            sa.bindparam("id1", uuid.uuid4(), type_=postgresql.UUID(as_uuid=True)),
+            sa.bindparam("id2", uuid.uuid4(), type_=postgresql.UUID(as_uuid=True)),
+            sa.bindparam("id3", uuid.uuid4(), type_=postgresql.UUID(as_uuid=True)),
+            sa.bindparam("id4", uuid.uuid4(), type_=postgresql.UUID(as_uuid=True)),
         )
     )
 
