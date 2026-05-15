@@ -159,7 +159,7 @@ def _load_migration_0009():
 
     path = (
         pathlib.Path(__file__).parent.parent
-        / "alembic"
+        / "migrations"
         / "versions"
         / "0009_phase3_products.py"
     )

@@ -361,15 +361,15 @@ def _load_migration_0005():
     import sys
     from unittest.mock import MagicMock
 
-    # The local apps/api/alembic/ package shadows the installed alembic package.
-    # Inject a stub for alembic.op before exec so `from alembic import op` resolves.
+    # Inject a stub for alembic.op before exec so `from alembic import op` resolves
+    # without requiring a live DB context.
     alembic_mod = sys.modules.get("alembic")
     if alembic_mod is not None and not hasattr(alembic_mod, "op"):
         alembic_mod.op = MagicMock()  # type: ignore[attr-defined]
     if "alembic.op" not in sys.modules:
         sys.modules["alembic.op"] = MagicMock()
 
-    path = pathlib.Path(__file__).parent.parent / "alembic" / "versions" / "0005_a11y_summary_cols.py"
+    path = pathlib.Path(__file__).parent.parent / "migrations" / "versions" / "0005_a11y_summary_cols.py"
     spec = importlib.util.spec_from_file_location("migration_0005", path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)

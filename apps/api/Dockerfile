@@ -20,7 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-project --package testlyn-api
 # Project source
 COPY apps/api/testlyn_api/ apps/api/testlyn_api/
 COPY apps/api/alembic.ini apps/api/alembic.ini
-COPY apps/api/alembic/ apps/api/alembic/
+COPY apps/api/migrations/ apps/api/migrations/
 
 RUN uv sync --frozen --no-dev --package testlyn-api
 
@@ -37,7 +37,7 @@ RUN ln -s /build/.venv /app/.venv
 
 COPY --from=builder /build/apps/api/testlyn_api /app/testlyn_api
 COPY --from=builder /build/apps/api/alembic.ini /app/alembic.ini
-COPY --from=builder /build/apps/api/alembic /app/alembic
+COPY --from=builder /build/apps/api/migrations /app/migrations
 
 ENV PATH="/build/.venv/bin:$PATH"
 ENV PYTHONPATH="/app"
