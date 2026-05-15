@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from sqlalchemy.ext.asyncio import create_async_engine
+from testlyn_api.config import get_settings
 from testlyn_api.core.db import Base
 
 # Import all models so metadata is populated
@@ -18,7 +18,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-DATABASE_URL = os.environ.get("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+# Use Settings so the Cloud Run Job picks up the same DB_HOST + DB_PASSWORD
+# wiring as the API service. Settings also reads DATABASE_URL when set,
+# making local/test runs work without changes.
+DATABASE_URL = get_settings().database_url
 
 
 def run_migrations_offline() -> None:
