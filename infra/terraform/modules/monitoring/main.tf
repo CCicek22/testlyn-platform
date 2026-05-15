@@ -45,7 +45,6 @@ resource "google_billing_budget" "testlyn" {
     pubsub_topic                     = google_pubsub_topic.budget_alerts.id
     schema_version                   = "1.0"
     monitoring_notification_channels = var.notification_channel_ids
-    disable_default_iam_alerts       = false
   }
 }
 

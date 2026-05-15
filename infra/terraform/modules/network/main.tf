@@ -51,6 +51,4 @@ resource "google_vpc_access_connector" "connector" {
   ip_cidr_range  = var.connector_cidr
   min_throughput = 200
   max_throughput = 1000
-
-  labels = local.common_labels
 }

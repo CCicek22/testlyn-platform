@@ -11,6 +11,22 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://testlyn:testlyn@localhost:5432/testlyn"
+    # Cloud Run wiring: when DB_HOST is set, build database_url from parts +
+    # DB_PASSWORD (mounted from Secret Manager). Keeps secrets out of plain env.
+    db_host: str = ""
+    db_port: int = 5432
+    db_name: str = "testlyn"
+    db_user: str = "api"
+    db_password: str = ""
+
+    @model_validator(mode="after")
+    def _compose_database_url(self) -> Settings:
+        if self.db_host:
+            self.database_url = (
+                f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+            )
+        return self
 
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
