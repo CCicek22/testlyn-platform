@@ -49,7 +49,7 @@ def upgrade() -> None:
             "events",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="'[]'::jsonb",
+            server_default=sa.text("'[]'::jsonb"),
         ),
         sa.Column("active", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column(
@@ -98,7 +98,7 @@ def upgrade() -> None:
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
         ),
-        sa.Column("status", sa.Text(), nullable=False, server_default="'pending'"),
+        sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("next_retry_at", sa.DateTime(timezone=True), nullable=True),
