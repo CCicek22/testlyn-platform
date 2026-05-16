@@ -22,8 +22,8 @@ variable "cmek_key_name" {
     and returns its name as output.  Pass a non-empty value to use a
     customer-supplied key (BYOK scenario).
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
 }
 
 variable "rotation_period" {

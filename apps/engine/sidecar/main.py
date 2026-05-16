@@ -20,19 +20,90 @@ SIGTERM handling:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 import structlog
 
 from sidecar.bq_writer import BQWriter
 from sidecar.config import SidecarConfig
 from sidecar.health import HealthServer
+from sidecar.parsers.axe import AxeParser
+from sidecar.parsers.base import Parser
 from sidecar.parsers.k6 import K6Parser
+from sidecar.parsers.playwright import PlaywrightParser
 from sidecar.spool import Spool
 from sidecar.windows import WindowAggregator
+
+
+def _build_parser(cfg: SidecarConfig) -> Parser:
+    """Dispatch on cfg.PARSER (k6 | axe | playwright)."""
+    name = cfg.PARSER.lower()
+    if name == "k6":
+        return K6Parser(cfg.input_path)
+    if name == "axe":
+        return AxeParser(cfg.input_path)
+    if name == "playwright":
+        return PlaywrightParser(cfg.input_path)
+    raise ValueError(f"Unknown PARSER value: {cfg.PARSER!r}")
+
+
+def _read_summary_json(path: str) -> dict[str, Any] | None:
+    """Read k6 --summary-export JSON if present; return None on any error."""
+    try:
+        data: dict[str, Any] = json.loads(Path(path).read_text())
+        return data
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+async def _await_exit_code(
+    path: str,
+    log: Any,
+    *,
+    timeout_s: float = 5.0,
+    poll_interval_s: float = 0.1,
+) -> int:
+    """Wait up to `timeout_s` for the entrypoint to write the exit-code file.
+
+    The entrypoint may not have written it yet when the sidecar reaches the
+    runs_summary stage (race between k6 EOF and the trap firing).  Poll the
+    file, then fall back to env / 0.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        if Path(path).exists():  # noqa: ASYNC240 — single stat, no blocking I/O
+            return _read_exit_code(path)
+        await asyncio.sleep(poll_interval_s)
+    log.warning("sidecar.exit_code_timeout", path=path)
+    return _read_exit_code(path)
+
+
+def _read_exit_code(path: str, default: int = 0) -> int:
+    """Read the integer exit code the engine entrypoint wrote on workload finish.
+
+    Falls back to the K6_EXIT_CODE env var (legacy path) and then `default`.
+    """
+    try:
+        raw = Path(path).read_text().strip()
+        if raw:
+            return int(raw)
+    except (OSError, ValueError):
+        pass
+    env = os.environ.get("K6_EXIT_CODE")
+    if env is not None:
+        try:
+            return int(env)
+        except ValueError:
+            return default
+    return default
 
 
 def _configure_logging(level: str) -> None:
@@ -62,7 +133,8 @@ async def main() -> None:
         product=cfg.PRODUCT,
         region=cfg.REGION,
         bq_dataset=cfg.BQ_DATASET,
-        k6_output_path=cfg.K6_OUTPUT_PATH,
+        parser=cfg.PARSER,
+        input_path=cfg.input_path,
         batch_size=cfg.BATCH_SIZE,
         flush_interval_seconds=cfg.FLUSH_INTERVAL_SECONDS,
         window_seconds=cfg.WINDOW_SECONDS,
@@ -73,7 +145,7 @@ async def main() -> None:
     spool = Spool(cfg.SPOOL_DIR, cap_bytes=cfg.SPOOL_MAX_BYTES)
     writer = BQWriter(cfg, spool=spool)
     health = HealthServer(port=cfg.HEALTH_PORT)
-    parser = K6Parser(cfg.K6_OUTPUT_PATH)
+    parser = _build_parser(cfg)
     aggregator = WindowAggregator(
         run_id=cfg.RUN_ID,
         org_id=cfg.ORG_ID,
@@ -115,14 +187,24 @@ async def main() -> None:
 
         finished_at = datetime.now(tz=UTC)
 
-        # Determine status from environment variable set by entrypoint.sh
-        k6_exit = int(os.environ.get("K6_EXIT_CODE", "0"))
+        # Read k6 exit code from the file the entrypoint writes AFTER k6 finishes
+        # (env-var-at-startup race is fixed; see entrypoint.sh).  Poll briefly
+        # in case the entrypoint is still flushing it.
+        k6_exit = await _await_exit_code(cfg.EXIT_CODE_PATH, log)
         status = "completed" if k6_exit == 0 else "failed"
+
+        summary_blob = _read_summary_json(cfg.K6_SUMMARY_PATH)
+        if summary_blob is None and cfg.PARSER == "k6":
+            log.warning(
+                "sidecar.summary_missing",
+                summary_path=cfg.K6_SUMMARY_PATH,
+            )
 
         await writer.write_runs_summary(
             started_at=started_at,
             finished_at=finished_at,
             status=status,
+            summary_json=summary_blob,
         )
 
         stats = await writer.stats()

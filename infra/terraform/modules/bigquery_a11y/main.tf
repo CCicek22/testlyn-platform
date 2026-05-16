@@ -46,10 +46,10 @@ resource "google_bigquery_table" "a11y_violations_cache" {
   labels = local.common_labels
 
   schema = jsonencode([
-    { name = "rule_id",            type = "STRING",    mode = "REQUIRED", description = "axe-core rule ID" },
-    { name = "html_snippet_hash",  type = "STRING",    mode = "REQUIRED", description = "SHA-256 prefix of html_snippet" },
-    { name = "remediation",        type = "STRING",    mode = "REQUIRED", description = "LLM-generated remediation text" },
-    { name = "created_at",         type = "TIMESTAMP", mode = "REQUIRED", description = "Row creation time" },
+    { name = "rule_id", type = "STRING", mode = "REQUIRED", description = "axe-core rule ID" },
+    { name = "html_snippet_hash", type = "STRING", mode = "REQUIRED", description = "SHA-256 prefix of html_snippet" },
+    { name = "remediation", type = "STRING", mode = "REQUIRED", description = "LLM-generated remediation text" },
+    { name = "created_at", type = "TIMESTAMP", mode = "REQUIRED", description = "Row creation time" },
   ])
 }
 

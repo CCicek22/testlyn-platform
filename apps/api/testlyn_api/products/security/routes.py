@@ -5,6 +5,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, status
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.products.security.runner import SecurityRunner
 from testlyn_api.products.security.schemas import SecurityScanResponse, ZapScanRequest
@@ -34,6 +35,16 @@ async def scan(
 
     Gracefully stubs when ZAP binary is unavailable (returns 0 findings).
     """
+    # Verify caller belongs to body.org_id — otherwise an authenticated user
+    # could trigger DAST scans (and bill) against another tenant.
+    await _enforce_perm(
+        "run",
+        "test",
+        user_id=current_user.id,
+        org_id=body.org_id,
+        session=session,
+    )
+
     scan_id = uuid.uuid4()
 
     result = await _runner.launch(

@@ -5,6 +5,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, status
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.products.api_contract.runner import ApiContractRunner
 from testlyn_api.products.api_contract.schemas import (
@@ -38,6 +39,16 @@ async def scan(
 
     Gracefully stubs when schemathesis binary is unavailable.
     """
+    # Verify caller belongs to body.org_id — otherwise an authenticated user
+    # could trigger contract scans against another tenant.
+    await _enforce_perm(
+        "run",
+        "test",
+        user_id=current_user.id,
+        org_id=body.org_id,
+        session=session,
+    )
+
     scan_id = uuid.uuid4()
 
     result = await _runner.launch(

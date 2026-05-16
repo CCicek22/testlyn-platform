@@ -80,6 +80,14 @@ TEST_ENGINE = create_async_engine(
 sa_event.listen(TEST_ENGINE.sync_engine, "connect", _enable_sqlite_fk)
 TestSessionLocal = async_sessionmaker(TEST_ENGINE, expire_on_commit=False)
 
+# Wire the lazy db._session_factory at the test engine so any code path that
+# spins up a short-lived session (e.g. the SSE streamer tick loop) uses the
+# same in-memory DB as the request-scoped dependency override.
+import testlyn_api.core.db as _db  # noqa: E402
+
+_db._session_factory_singleton = TestSessionLocal  # type: ignore[attr-defined]
+_db._engine = TEST_ENGINE  # type: ignore[attr-defined]
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_rate_limit_store() -> None:

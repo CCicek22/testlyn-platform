@@ -109,7 +109,8 @@ async def test_viewer_cannot_trigger_run(
     """viewer role must get 403 on POST /v1/tests/{test_id}/runs."""
     from testlyn_api.core import tasks
 
-    monkeypatch.setattr(tasks, "enqueue_run", lambda _: None)
+    async def _noop(_): pass
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
 
     org_id = await _create_org(client, "ViewerRunOrg")
     proj_id = await _create_project(client, org_id)
@@ -135,7 +136,8 @@ async def test_member_can_trigger_run(
     """member role must succeed on POST /v1/tests/{test_id}/runs."""
     from testlyn_api.core import tasks
 
-    monkeypatch.setattr(tasks, "enqueue_run", lambda _: None)
+    async def _noop(_): pass
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
 
     org_id = await _create_org(client, "MemberRunOrg")
     proj_id = await _create_project(client, org_id)
@@ -325,7 +327,8 @@ async def test_project_override_restricts_admin_to_viewer(
     """Org-level admin + project-level viewer override → cannot trigger run in that project."""
     from testlyn_api.core import tasks
 
-    monkeypatch.setattr(tasks, "enqueue_run", lambda _: None)
+    async def _noop(_): pass
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
 
     org_id = await _create_org(client, "RestrictOrg")
     proj_id = await _create_project(client, org_id)

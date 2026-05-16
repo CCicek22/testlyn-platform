@@ -24,7 +24,9 @@
  */
 
 const { chromium } = require("playwright");
-const { AxePuppeteer } = require("@axe-core/playwright");
+// @axe-core/playwright ships as ESM with a default export named AxeBuilder.
+// Under CommonJS require() the namespace object has the class on `.default`.
+const { default: AxeBuilder } = require("@axe-core/playwright");
 
 const RUN_ID = process.env.RUN_ID || "local";
 const MAX_DEPTH = parseInt(process.env.MAX_DEPTH || "1", 10);
@@ -48,7 +50,7 @@ async function auditPage(url, page) {
 
   let results;
   try {
-    results = await new AxePuppeteer(page).withTags(WCAG_TAGS).analyze();
+    results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   } catch (err) {
     process.stderr.write(`[warn] axe.analyze failed for ${url}: ${err.message}\n`);
     return;

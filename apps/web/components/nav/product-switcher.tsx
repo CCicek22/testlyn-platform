@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { PRODUCTS, type Product } from "@/lib/products";
@@ -23,14 +24,12 @@ export function ProductSwitcher() {
     params.set("product", id);
     // Navigate to runs list filtered by the chosen product
     router.push(`/runs?${params.toString()}`);
-    // Drive CSS var via data attribute on <body>
-    document.body.setAttribute("data-product", id);
   }
 
-  // Sync body attribute on render (handles page load / back-nav)
-  if (typeof window !== "undefined") {
+  // Sync body attribute as a side effect — never touch the DOM during render.
+  useEffect(() => {
     document.body.setAttribute("data-product", current);
-  }
+  }, [current]);
 
   return (
     <div className="px-3 pb-3">

@@ -8,14 +8,16 @@ output "web_url" {
   value       = module.cloud_run_web.service_url
 }
 
-output "db_connection_name" {
-  description = "Cloud SQL instance connection name"
-  value       = module.cloud_sql.instance_connection_name
+# DELETED 2026-05-16 — live runs self-hosted on db-vm VM. db_connection_name
+# and redis_url outputs removed with cloud_sql / memorystore modules.
+output "db_host" {
+  description = "Postgres host (self-hosted PgBouncer on db-vm VM)"
+  value       = var.db_host
 }
 
 output "redis_url" {
-  description = "Memorystore Redis connection URL"
-  value       = module.memorystore.redis_url
+  description = "Redis connection URL (self-hosted on db-vm VM)"
+  value       = var.redis_url
   sensitive   = true
 }
 

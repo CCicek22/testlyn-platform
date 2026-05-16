@@ -110,10 +110,15 @@ _gcs_download "${SCRIPT_GCS_URI}" "${WORK_DIR}/test.spec.ts"
 # 2. Create named pipe
 [ -p "${PW_OUTPUT_PATH}" ] || mkfifo "${PW_OUTPUT_PATH}"
 
-# 3. Start sidecar (reads PW_OUTPUT_PATH via PLAYWRIGHT_OUTPUT_PATH env)
+# 3. Start sidecar reading the named pipe in background.
+# The unified PARSER + INPUT_PATH env vars match the dispatch in sidecar/main.py
+# (fix #1 of audit).  Sidecar opens the named pipe and blocks until the
+# Playwright JSON blob is fed in (step 4 below).
 echo "[entrypoint] starting sidecar..."
 PRODUCT=functional \
-    PLAYWRIGHT_OUTPUT_PATH="${PW_OUTPUT_PATH}" \
+    PARSER=playwright \
+    INPUT_PATH="${PW_OUTPUT_PATH}" \
+    EXIT_CODE_PATH="${WORK_DIR}/pw_exit_code" \
     python3 -m sidecar.main &
 SIDECAR_PID=$!
 echo "[entrypoint] sidecar PID=${SIDECAR_PID}"
@@ -124,10 +129,14 @@ if ! kill -0 "${SIDECAR_PID}" 2>/dev/null; then
     PW_EXIT=1; exit 1
 fi
 
-# 4. Run Playwright
-# Playwright emits a single JSON blob on stdout; write directly to a temp file
-# so we capture its true exit code via $?, then copy into the named pipe for
-# the sidecar.  Using `tee` would capture tee's exit, not Playwright's.
+# 4. Run Playwright → temp file → pipe.
+# Correct sequence (fix #3 of audit):
+#   (a) sidecar already started in step 3 reading the pipe
+#   (b) run Playwright (writes JSON blob to a temp file)
+#   (c) cat tempfile > pipe (FOREGROUND — EOF closes pipe so sidecar exits)
+#   (d) wait $SIDECAR_PID
+# Previously `cat ... > pipe &` was BACKGROUNDED, leaving the sidecar reading
+# the pipe forever and never seeing EOF.
 echo "[entrypoint] running Playwright tests"
 set +e
 npx playwright test \
@@ -136,13 +145,19 @@ npx playwright test \
     > "${WORK_DIR}/pw-summary.json" 2>&1
 PW_EXIT=$?
 set -e
-# Feed the JSON blob into the sidecar's named pipe (sidecar reads one blob)
-cat "${WORK_DIR}/pw-summary.json" > "${PW_OUTPUT_PATH}" &
 echo "[entrypoint] playwright exited with code ${PW_EXIT}"
+echo "${PW_EXIT}" > "${WORK_DIR}/pw_exit_code"
+
+# Feed the JSON blob into the sidecar's named pipe (foreground; EOF closes pipe).
+cat "${WORK_DIR}/pw-summary.json" > "${PW_OUTPUT_PATH}"
+
+# Wait for sidecar to drain and exit cleanly (cleanup trap also waits, but
+# doing it here lets us catch a sidecar crash before the trap shadows it).
+wait "${SIDECAR_PID}" || true
 
 if ! kill -0 "${SIDECAR_PID}" 2>/dev/null; then
-    echo "[entrypoint] sidecar exited unexpectedly" >&2
-    PW_EXIT=1
+    # Sidecar reaped; this is expected — keep PW_EXIT as-is.
+    :
 fi
 
 # cleanup trap fires from here

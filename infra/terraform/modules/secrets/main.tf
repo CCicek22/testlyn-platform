@@ -7,10 +7,10 @@ locals {
   }
 
   secrets = {
-    "testlyn-db-password"         = "Cloud SQL Postgres password for testlyn API"
-    "testlyn-stripe-secret-key"   = "Stripe secret key"
-    "testlyn-stripe-webhook-secret" = "Stripe webhook signing secret"
-    "testlyn-sendgrid-api-key"    = "SendGrid API key"
+    "testlyn-db-password"              = "Cloud SQL Postgres password for testlyn API"
+    "testlyn-stripe-secret-key"        = "Stripe secret key"
+    "testlyn-stripe-webhook-secret"    = "Stripe webhook signing secret"
+    "testlyn-sendgrid-api-key"         = "SendGrid API key"
     "testlyn-firebase-service-account" = "Firebase Admin SDK service account JSON"
   }
 }

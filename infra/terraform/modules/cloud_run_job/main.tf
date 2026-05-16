@@ -21,10 +21,10 @@ resource "google_cloud_run_v2_job" "job" {
     task_count  = 1
 
     template {
-      service_account         = var.service_account_email
-      timeout                 = "${var.timeout_seconds}s"
-      max_retries             = var.max_retries
-      execution_environment   = "EXECUTION_ENVIRONMENT_GEN2"
+      service_account       = var.service_account_email
+      timeout               = "${var.timeout_seconds}s"
+      max_retries           = var.max_retries
+      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
       vpc_access {
         connector = var.vpc_connector_id

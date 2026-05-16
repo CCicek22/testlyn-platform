@@ -31,7 +31,13 @@ def _verify_internal_token(x_internal_token: str | None) -> None:
         return  # dev bypass — no header required
     expected = getattr(settings, "internal_token", None)
     if not expected:
-        return  # not configured — allow (backwards compat with existing deploys)
+        # Cloud mode requires a configured shared secret. Refusing rather than
+        # allowing matches our "secure-by-default" posture: an unset secret in
+        # production must be loud, not silently bypass authentication.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Internal token not configured",
+        )
     if not x_internal_token or not secrets.compare_digest(x_internal_token, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal token")
 

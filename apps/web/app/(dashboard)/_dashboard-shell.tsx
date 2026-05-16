@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { LogoPulse } from "@/components/brand/logo-pulse";
 import { useAuth } from "@/components/auth/auth-provider";
 import { signOutUser } from "@/lib/firebase";
@@ -167,8 +167,9 @@ export default function DashboardShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [compactSidebar, setCompactSidebar] = useState(false);
 
@@ -176,6 +177,19 @@ export default function DashboardShell({
 
   const currentProduct = searchParams.get("product") ?? "load";
   const safeProduct = isProduct(currentProduct) ? currentProduct : "load";
+
+  // Client-side auth guard: redirect signed-out users before any data-fetching
+  // child renders. Avoids the flash of dashboard chrome + a stream of 401s
+  // while React Query mounts and hits the API anonymously.
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login");
+    }
+  }, [loading, user, router]);
+
+  if (!loading && !user) {
+    return null;
+  }
 
   async function handleSignOut() {
     await signOutUser();

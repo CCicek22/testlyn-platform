@@ -69,33 +69,32 @@ module "secrets" {
   depends_on = [module.apis]
 }
 
-# ── Cloud SQL ────────────────────────────────────────────────────────────────
-module "cloud_sql" {
-  source     = "../../modules/cloud_sql"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-  db_tier    = var.db_tier
-
-  vpc_id                 = module.network.vpc_id
-  private_vpc_connection = module.network.private_vpc_connection
-  db_password            = var.db_password
-
-  depends_on = [module.network]
-}
-
-# ── Memorystore (Redis) ──────────────────────────────────────────────────────
-module "memorystore" {
-  source     = "../../modules/memorystore"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  vpc_id                 = module.network.vpc_id
-  private_vpc_connection = module.network.private_vpc_connection
-
-  depends_on = [module.network]
-}
+# DELETED 2026-05-16 — live runs self-hosted on db-vm VM (10.0.0.5).
+# Cloud SQL + Memorystore were torn down by operator; re-introducing these
+# modules would either destroy live data or create duplicate stateful
+# resources. App reads DB via var.db_host / var.redis_url instead.
+#
+# module "cloud_sql" {
+#   source     = "../../modules/cloud_sql"
+#   project_id = var.gcp_project_id
+#   region     = var.region
+#   env        = var.env
+#   db_tier    = var.db_tier
+#   vpc_id                 = module.network.vpc_id
+#   private_vpc_connection = module.network.private_vpc_connection
+#   db_password            = var.db_password
+#   depends_on = [module.network]
+# }
+#
+# module "memorystore" {
+#   source     = "../../modules/memorystore"
+#   project_id = var.gcp_project_id
+#   region     = var.region
+#   env        = var.env
+#   vpc_id                 = module.network.vpc_id
+#   private_vpc_connection = module.network.private_vpc_connection
+#   depends_on = [module.network]
+# }
 
 # ── BigQuery ─────────────────────────────────────────────────────────────────
 module "bigquery" {
@@ -135,7 +134,7 @@ module "cloud_run_api" {
   service_name          = "testlyn-api"
   image                 = var.api_image
   service_account_email = module.iam.api_sa_email
-  vpc_connector_id      = module.network.connector_id
+  network_interfaces    = [{ network = "default", subnetwork = "default" }]
   min_instances         = 0
   max_instances         = 5
   cpu                   = "1000m"
@@ -145,19 +144,19 @@ module "cloud_run_api" {
   allow_unauthenticated = true
 
   env_vars = {
-    GCP_PROJECT     = var.gcp_project_id
-    REGION          = var.region
-    ENV             = var.env
-    DB_HOST         = module.cloud_sql.private_ip
-    DB_NAME         = module.cloud_sql.database_name
-    DB_USER         = module.cloud_sql.db_user
-    REDIS_URL       = module.memorystore.redis_url
-    BQ_DATASET      = module.bigquery.dataset_id
-    TASKS_QUEUE     = module.cloud_tasks.queue_name
-    SCRIPTS_BUCKET  = module.gcs.scripts_bucket
-    RESULTS_BUCKET  = module.gcs.results_bucket
-    REPORTS_BUCKET  = module.gcs.reports_bucket
-    LOGS_BUCKET     = module.gcs.logs_bucket
+    GCP_PROJECT    = var.gcp_project_id
+    REGION         = var.region
+    ENV            = var.env
+    DB_HOST        = var.db_host
+    DB_NAME        = "testlyn"
+    DB_USER        = "testlyn"
+    REDIS_URL      = var.redis_url
+    BQ_DATASET     = module.bigquery.dataset_id
+    TASKS_QUEUE    = module.cloud_tasks.queue_name
+    SCRIPTS_BUCKET = module.gcs.scripts_bucket
+    RESULTS_BUCKET = module.gcs.results_bucket
+    REPORTS_BUCKET = module.gcs.reports_bucket
+    LOGS_BUCKET    = module.gcs.logs_bucket
   }
 
   secret_env_vars = {
@@ -167,7 +166,7 @@ module "cloud_run_api" {
     }
   }
 
-  depends_on = [module.cloud_sql, module.memorystore, module.iam, module.network]
+  depends_on = [module.iam, module.network]
 }
 
 # ── Cloud Run: Web service ─────────────────────────────────────────────────
@@ -180,7 +179,7 @@ module "cloud_run_web" {
   service_name          = "testlyn-web"
   image                 = var.web_image
   service_account_email = module.iam.web_sa_email
-  vpc_connector_id      = module.network.connector_id
+  network_interfaces    = [{ network = "default", subnetwork = "default" }]
   min_instances         = 0
   max_instances         = 5
   cpu                   = "1000m"

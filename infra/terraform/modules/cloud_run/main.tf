@@ -19,14 +19,38 @@ resource "google_cloud_run_v2_service" "service" {
 
     labels = local.common_labels
 
+    # Emit direct VPC egress annotation when network_interfaces are configured.
+    # Live infra (self-hosted db-vm on default VPC) uses this path; vpc_connector
+    # is the legacy Serverless VPC Access connector path.
+    annotations = length(var.network_interfaces) > 0 ? {
+      "run.googleapis.com/network-interfaces" = jsonencode(var.network_interfaces)
+    } : {}
+
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = var.max_instances
     }
 
-    vpc_access {
-      connector = var.vpc_connector_id
-      egress    = "PRIVATE_RANGES_ONLY"
+    dynamic "vpc_access" {
+      for_each = var.vpc_connector_id != "" ? [1] : []
+      content {
+        connector = var.vpc_connector_id
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
+    }
+
+    dynamic "vpc_access" {
+      for_each = length(var.network_interfaces) > 0 ? [1] : []
+      content {
+        egress = "PRIVATE_RANGES_ONLY"
+        dynamic "network_interfaces" {
+          for_each = var.network_interfaces
+          content {
+            network    = network_interfaces.value.network
+            subnetwork = network_interfaces.value.subnetwork
+          }
+        }
+      }
     }
 
     containers {

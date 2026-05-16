@@ -27,8 +27,30 @@ class SidecarConfig(BaseSettings):
     BQ_SAMPLES_TABLE: str = Field(default="samples_1s")
     BQ_SUMMARY_TABLE: str = Field(default="runs_summary")
 
-    # k6 JSONL input path (named pipe or regular file)
+    # Parser dispatch — "k6" (default), "axe", or "playwright".  Determines
+    # which Parser implementation the sidecar instantiates in main.py.
+    PARSER: str = Field(default="k6")
+
+    # Unified input path used by every parser.  Phase-1 keeps K6_OUTPUT_PATH
+    # as a back-compat alias; if INPUT_PATH is unset, the property
+    # `input_path` falls back to K6_OUTPUT_PATH (k6) or the named pipe
+    # convention for other engines.
+    INPUT_PATH: str | None = Field(default=None)
+
+    # k6 JSONL input path (named pipe or regular file).  Kept for back-compat;
+    # new code should read `cfg.input_path` (property below).
     K6_OUTPUT_PATH: str = Field(default="/tmp/k6.jsonl")
+
+    # Path to k6's --summary-export JSON (written by entrypoint.sh after k6
+    # finishes).  Used by `write_runs_summary` to populate spec §5 columns
+    # (vus_max / iterations / http_reqs / http_failed / data_sent / data_received).
+    # If absent or unreadable, those columns are written as NULL.
+    K6_SUMMARY_PATH: str = Field(default="/tmp/work/summary.json")
+
+    # Path the engine entrypoint writes the k6/playwright exit code to AFTER
+    # the workload exits.  The sidecar polls this file before writing
+    # runs_summary so the env-var-at-startup race is gone.
+    EXIT_CODE_PATH: str = Field(default="/tmp/k6_exit_code")
 
     # Aggregation
     WINDOW_SECONDS: int = Field(default=1, ge=1)
@@ -62,3 +84,11 @@ class SidecarConfig(BaseSettings):
     @property
     def summary_table_id(self) -> str:
         return f"{self.GCP_PROJECT}.{self.BQ_DATASET}.{self.BQ_SUMMARY_TABLE}"
+
+    @property
+    def input_path(self) -> str:
+        """Resolved input path for the parser.
+
+        Precedence: explicit INPUT_PATH → K6_OUTPUT_PATH (back-compat).
+        """
+        return self.INPUT_PATH or self.K6_OUTPUT_PATH

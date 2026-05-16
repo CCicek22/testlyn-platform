@@ -22,8 +22,11 @@ export const metadata: Metadata = {
   },
   description:
     "Run k6 load tests, stream live metrics, and ship with confidence. Built for engineering teams that measure what matters.",
+  // Use the site origin (Next.js host), not the API host. metadataBase is the
+  // base for OG/twitter image URLs and canonical links — those must resolve to
+  // the user-facing dashboard, not the API service.
   metadataBase: new URL(
-    process.env["NEXT_PUBLIC_API_BASE_URL"] ?? "http://localhost:3000"
+    process.env["NEXT_PUBLIC_SITE_URL"] ?? "http://localhost:3000"
   ),
   icons: {
     icon: [

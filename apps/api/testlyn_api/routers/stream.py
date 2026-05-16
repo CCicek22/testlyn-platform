@@ -52,6 +52,12 @@ async def stream_run(
 
     max_ticks = settings.sse_max_ticks  # 0 = unlimited
 
+    # Snapshot the run state we already loaded; use a fresh session per tick
+    # below. Holding `session` open for the SSE lifetime ties up a connection
+    # for the entire stream and the previous `begin_nested()` without an outer
+    # transaction was a noop/error on most backends.
+    from testlyn_api.core.db import _session_factory
+
     async def _source() -> AsyncGenerator[dict[str, Any]]:
         tick = 0
         while True:
@@ -61,9 +67,9 @@ async def stream_run(
             if await request.is_disconnected():
                 return
 
-            # Re-fetch run state each tick
-            async with session.begin_nested():
-                fresh = await session.get(TestRun, run_id)
+            # Short-lived session per tick — checkout, fetch, return to pool.
+            async with _session_factory() as tick_session:
+                fresh = await tick_session.get(TestRun, run_id)
             if fresh is None:
                 return
 

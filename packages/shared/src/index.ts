@@ -95,9 +95,8 @@ export interface TestRun {
 
 // ─── API request / response shapes ───────────────────────────────────────────
 
-export interface MeResponse {
-  user: User;
-  memberships: Array<{ org: Org; role: OrgMemberRole }>;
+export interface MeResponse extends User {
+  memberships: Array<{ org_id: string; role: OrgMemberRole }>;
 }
 
 export interface CreateOrgRequest {

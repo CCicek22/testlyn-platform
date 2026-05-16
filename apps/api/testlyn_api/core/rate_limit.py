@@ -227,47 +227,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def _resolve_identity(self, request: Request) -> tuple[str, str]:
         """Return (org_id_str, plan).
 
-        Simplified for Phase 3 scaffold:
-        - X-Api-Key present → use prefix as org_id key (real lookup deferred to
-          router-level dependency in a follow-up PR).
-        - Bearer JWT → extract 'org_id' claim if present.
+        Identity sources, in priority order:
+        - X-Api-Key present → use hashed prefix as bucket key.
+        - Bearer JWT → verify via Firebase (``token_verify.verify_token``)
+          and use the verified ``org_id`` claim if present. Unverified
+          payloads are NEVER trusted — an attacker could otherwise base64-
+          encode any org_id and steal another tenant's rate budget.
         - Fallback → remote IP, free tier.
         """
+        from testlyn_api.core.token_verify import extract_bearer, verify_token
+
         # --- X-Api-Key ---
         api_key = request.headers.get("X-Api-Key", "")
         if api_key:
             prefix = api_key[:16]
             return f"apikey:{prefix}", "free"  # plan lookup deferred
 
-        # --- Bearer JWT ---
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
-            org_id = _extract_org_from_jwt(token)
-            if org_id:
-                return org_id, "free"  # plan lookup deferred to service layer
+        # --- Bearer JWT (verified) ---
+        token = extract_bearer(request.headers.get("Authorization", ""))
+        if token is not None:
+            claims = verify_token(token)
+            if claims is not None:
+                org_id = claims.get("org_id") or claims.get("orgId")
+                if org_id:
+                    return str(org_id), "free"  # plan lookup deferred to service layer
 
         # --- Fallback: IP-based ---
         client_ip = (request.client.host if request.client else "unknown")
         return f"ip:{client_ip}", "free"
-
-
-def _extract_org_from_jwt(token: str) -> str | None:
-    """Best-effort JWT claim extraction without full verification.
-
-    The auth middleware upstream already verifies the token; we just need the
-    org_id claim for rate-limiting keying.
-    """
-    try:
-        import base64
-        import json
-
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-        # Pad and decode payload
-        payload_b64 = parts[1] + "=="
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-        return payload.get("org_id") or payload.get("orgId")
-    except Exception:
-        return None

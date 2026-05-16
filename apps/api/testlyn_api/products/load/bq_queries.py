@@ -8,6 +8,26 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
+# Module-level singleton — google.cloud.bigquery.Client opens an HTTP session
+# and a credentials chain on construction; instantiating it on every SSE tick
+# (once per second per viewer) is a measurable hot spot. Keyed by project so a
+# project change in tests creates a fresh client.
+_BQ_CLIENT: Any = None
+_BQ_CLIENT_PROJECT: str | None = None
+
+
+def _get_client(project: str) -> Any:
+    """Return a process-wide bigquery.Client for ``project`` (lazy)."""
+    global _BQ_CLIENT, _BQ_CLIENT_PROJECT
+    if _BQ_CLIENT is not None and _BQ_CLIENT_PROJECT == project:
+        return _BQ_CLIENT
+
+    from google.cloud import bigquery
+
+    _BQ_CLIENT = bigquery.Client(project=project)
+    _BQ_CLIENT_PROJECT = project
+    return _BQ_CLIENT
+
 _STREAM_METRICS_SQL = """
 SELECT
   TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
@@ -48,7 +68,7 @@ async def stream_run_metrics(
         log.warning("bq_queries.bigquery_unavailable", run_id=str(run_id))
         return []
 
-    client = bigquery.Client(project=project)
+    client = _get_client(project)
 
     sql = _STREAM_METRICS_SQL.format(project=project, dataset=dataset)
 

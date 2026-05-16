@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import subprocess
 import uuid
 from typing import Any
 
+import httpx
 import structlog
 
 from testlyn_api.config import get_settings
@@ -12,6 +13,36 @@ from testlyn_api.config import get_settings
 log = structlog.get_logger(__name__)
 
 _background_tasks: set[Any] = set()
+
+# Per-attempt timeout and retry budget for the internal POST. The endpoint
+# is local (same container in compose), so a short timeout + 3 attempts is
+# plenty; we don't want to keep the test loop / dev shell waiting if the
+# API is unreachable.
+_POST_TIMEOUT_S = 2.0
+_POST_ATTEMPTS = 3
+_POST_BACKOFF_S = 0.2
+
+
+async def _post_internal(url: str, payload: dict[str, Any]) -> None:
+    """POST JSON to an internal endpoint with bounded retries.
+
+    Shared between core/tasks.py (docker enqueue) and core/runner_dispatcher.py
+    (docker dispatch). Replaces the previous shell-out to ``curl``, which both
+    required ``curl`` in the image and gave us no structured error handling.
+    """
+    last_exc: Exception | None = None
+    async with httpx.AsyncClient(timeout=_POST_TIMEOUT_S) as client:
+        for attempt in range(1, _POST_ATTEMPTS + 1):
+            try:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                return
+            except (httpx.HTTPError, httpx.TimeoutException) as exc:
+                last_exc = exc
+                if attempt < _POST_ATTEMPTS:
+                    await asyncio.sleep(_POST_BACKOFF_S * attempt)
+    assert last_exc is not None
+    raise last_exc
 
 
 async def enqueue_run(run_id: uuid.UUID) -> None:
@@ -64,37 +95,23 @@ async def _enqueue_cloud_tasks(run_id: uuid.UUID) -> None:
 
 async def _enqueue_docker(run_id: uuid.UUID) -> None:
     """
-    Local dev mode: invoke the internal start endpoint directly via an async
-    subprocess so we don't block the request handler.
+    Local dev mode: invoke the internal start endpoint directly via httpx so
+    we don't block the request handler. Fire-and-forget — the task is tracked
+    in ``_background_tasks`` so the GC won't reap it mid-flight.
     """
-    import asyncio
-
     settings = get_settings()
     url = f"{settings.api_base_url}/v1/internal/runs/{run_id}/start"
 
     async def _call() -> None:
-        proc = await asyncio.create_subprocess_exec(
-            "curl",
-            "-s",
-            "-X",
-            "POST",
-            url,
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            json.dumps({"run_id": str(run_id)}),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        _stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
+        try:
+            await _post_internal(url, {"run_id": str(run_id)})
+            log.info("tasks.docker_call_ok", run_id=str(run_id))
+        except Exception as exc:  # noqa: BLE001 — log + drop, fire-and-forget
             log.warning(
                 "tasks.docker_call_failed",
                 run_id=str(run_id),
-                stderr=stderr.decode(),
+                error=str(exc),
             )
-        else:
-            log.info("tasks.docker_call_ok", run_id=str(run_id))
 
     task = asyncio.create_task(_call())
     # Keep reference to avoid GC before completion

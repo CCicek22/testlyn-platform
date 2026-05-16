@@ -3,6 +3,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from testlyn_api.config import get_settings
 from testlyn_api.deps import CurrentUserDep, SessionDep
@@ -19,7 +20,14 @@ async def _ensure_bootstrap_org_membership(
     user_id,
     email: str | None,
 ) -> None:
-    """Auto-grant owner role on the bootstrap dev org for allowlisted emails."""
+    """Auto-grant owner role on the bootstrap dev org for allowlisted emails.
+
+    Race: two concurrent /v1/me requests for the same user pass the
+    ``scalar_one_or_none() is None`` membership check simultaneously, both
+    insert, and the second commit blows up on the PK / unique constraint.
+    Wrap the insert in a savepoint and treat IntegrityError as "another
+    request already inserted" — the desired end-state is reached either way.
+    """
     settings = get_settings()
     if not email or email.lower() not in {e.lower() for e in settings.bootstrap_admin_emails}:
         return
@@ -34,13 +42,30 @@ async def _ensure_bootstrap_org_membership(
             name=settings.bootstrap_org_name,
         )
         session.add(org)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError:
+            # Concurrent caller created the org first — reload and continue.
+            await session.rollback()
+            result = await session.execute(
+                select(Organization).where(Organization.slug == settings.bootstrap_org_slug)
+            )
+            org = result.scalar_one()
 
     mem_q = await session.execute(
         select(OrgMember).where(OrgMember.org_id == org.id, OrgMember.user_id == user_id)
     )
     if mem_q.scalar_one_or_none() is None:
-        session.add(OrgMember(org_id=org.id, user_id=user_id, role="owner"))
+        try:
+            async with session.begin_nested():  # SAVEPOINT
+                session.add(OrgMember(org_id=org.id, user_id=user_id, role="owner"))
+        except IntegrityError:
+            # Concurrent /v1/me already inserted the membership — fine.
+            log.debug(
+                "auth.bootstrap.member_race",
+                user_id=str(user_id),
+                org_id=str(org.id),
+            )
     await session.commit()
 
 

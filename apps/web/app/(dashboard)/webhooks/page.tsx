@@ -8,6 +8,8 @@ import type {
   WebhookDelivery,
   CreateWebhookEndpointRequest,
 } from "@/lib/api-client";
+import { useAuth } from "@/components/auth/auth-provider";
+import type { MeResponse } from "@testlyn/shared";
 
 // ─── Status chip ─────────────────────────────────────────────────────────────
 
@@ -266,20 +268,44 @@ function EndpointCard({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function WebhooksPage() {
-  // In production this comes from the active org context. For now read from
-  // query param or fall back to the dev-bypass org id.
-  const orgId =
-    typeof window !== "undefined"
-      ? (new URLSearchParams(window.location.search).get("org_id") ??
-        "00000000-0000-0000-0000-d3eff3e10102")
-      : "00000000-0000-0000-0000-d3eff3e10102";
-
+  const { user } = useAuth();
   const [showModal, setShowModal] = useState(false);
+
+  // Resolve org id from auth context via /v1/me — never hardcode a UUID.
+  const { data: me } = useQuery<MeResponse>({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: user != null,
+    staleTime: 5 * 60_000,
+  });
+
+  const orgId = me?.memberships?.[0]?.org_id ?? null;
 
   const { data: endpoints = [], isLoading } = useQuery<WebhookEndpoint[]>({
     queryKey: ["webhook-endpoints", orgId],
-    queryFn: () => api.webhooks.listEndpoints(orgId),
+    queryFn: () => api.webhooks.listEndpoints(orgId!),
+    enabled: orgId != null,
   });
+
+  if (orgId == null) {
+    return (
+      <div className="flex flex-col min-h-full">
+        <div
+          className="border-b border-zinc-800 px-6 py-4"
+          style={{ borderTopColor: "#3730A3", borderTopWidth: 3 }}
+        >
+          <h1 className="text-lg font-bold tracking-tight text-zinc-100">
+            Webhooks
+          </h1>
+        </div>
+        <div className="px-6 py-6">
+          <p className="text-sm text-zinc-500">
+            {me == null ? "Loading organization…" : "No organization available."}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-full">

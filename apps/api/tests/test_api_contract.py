@@ -116,14 +116,14 @@ class TestContractScanSchemas:
 
 
 @pytest.mark.asyncio
-async def test_scan_returns_202(client: AsyncClient) -> None:
+async def test_scan_returns_202(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
     from unittest.mock import patch
 
     with patch("shutil.which", return_value=None):
         response = await client.post(
             "/v1/products/api-contract/scan",
             json={
-                "org_id": str(uuid.uuid4()),
+                "org_id": str(dev_org_id),
                 "openapi_url": "https://petstore3.swagger.io/api/v3/openapi.json",
                 "target_url": "https://petstore3.swagger.io",
             },
@@ -140,14 +140,14 @@ async def test_scan_returns_202(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scan_custom_hypothesis(client: AsyncClient) -> None:
+async def test_scan_custom_hypothesis(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
     from unittest.mock import patch
 
     with patch("shutil.which", return_value=None):
         response = await client.post(
             "/v1/products/api-contract/scan",
             json={
-                "org_id": str(uuid.uuid4()),
+                "org_id": str(dev_org_id),
                 "openapi_url": "https://example.com/openapi.json",
                 "target_url": "https://example.com",
                 "hypothesis_settings": {

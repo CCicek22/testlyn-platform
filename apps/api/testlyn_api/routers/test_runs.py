@@ -6,8 +6,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from testlyn_api.core import tasks as tasks_module
 from testlyn_api.core.permissions import _enforce_perm
-from testlyn_api.core.tasks import enqueue_run
 from testlyn_api.deps import AuditDep, CurrentUserDep, SessionDep
 from testlyn_api.models.org import Organization
 from testlyn_api.models.project import Project
@@ -80,8 +80,10 @@ async def create_run(
     )
     await session.commit()
 
-    # Dispatch async — don't await (fire-and-forget via Cloud Tasks or docker)
-    await enqueue_run(run.id)
+    # Dispatch async — don't await (fire-and-forget via Cloud Tasks or docker).
+    # Resolved through the module rather than as a direct binding so tests can
+    # monkeypatch tasks.enqueue_run without touching this router.
+    await tasks_module.enqueue_run(run.id)
 
     log.info("run.created", run_id=str(run.id), test_id=str(test_id))
     return RunOut.model_validate(run)

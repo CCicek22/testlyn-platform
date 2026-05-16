@@ -5,9 +5,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
+from testlyn_api.models.project import Project
+from testlyn_api.models.target import Target
+from testlyn_api.models.test import Test
+from testlyn_api.models.test_run import TestRun
 from testlyn_api.products.a11y.runner import A11yRunner
 from testlyn_api.products.a11y.schemas import (
     A11yAuditRequest,
@@ -37,6 +43,29 @@ async def one_shot_audit(
     Returns immediately with the runner_id; poll
     GET /v1/runs/:id/violations for results.
     """
+    # Resolve org via test_run -> test -> project chain and verify the caller
+    # belongs to that org. Without this, any authenticated user could enqueue
+    # a11y audits (and bill) against another tenant's runs.
+    run = (
+        await session.execute(select(TestRun).where(TestRun.id == body.test_run_id))
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    test = await session.get(Test, run.test_id)
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    project = await session.get(Project, test.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await _enforce_perm(
+        "run",
+        "test",
+        user_id=current_user.id,
+        org_id=project.org_id,
+        project_id=project.id,
+        session=session,
+    )
+
     result = await _runner.launch(
         test_run_id=body.test_run_id,
         script_uri="",  # a11y runner uses AUDIT_CONFIG_URI from env
@@ -77,9 +106,21 @@ async def create_recipe(
 
     TODO(W2C): wire Cloud Scheduler creation when schedule_cron is non-null.
     """
-    import json
-
     from testlyn_api.models.a11y_audit_recipe import AuditRecipe
+
+    # Resolve org via target and verify caller membership before creating a
+    # recipe (otherwise any authed user could attach recipes to another org's
+    # targets and trigger audits via the recipe scheduler).
+    target = await session.get(Target, body.target_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
+    await _enforce_perm(
+        "write",
+        "target",
+        user_id=current_user.id,
+        org_id=target.org_id,
+        session=session,
+    )
 
     recipe_id = uuid.uuid4()
     now = datetime.now(tz=UTC)
@@ -88,7 +129,11 @@ async def create_recipe(
     recipe = AuditRecipe(
         id=recipe_id,
         target_id=body.target_id,
-        urls=json.dumps(urls_json),
+        # SQLAlchemy serialises the list itself for the JSONB column — no
+        # json.dumps here. Previously the route did dumps + the column was
+        # mistyped as TEXT, so the round-trip produced a JSON-encoded string
+        # instead of a list.
+        urls=urls_json,
         max_depth=body.max_depth,
         schedule_cron=body.schedule_cron,
         created_at=now,

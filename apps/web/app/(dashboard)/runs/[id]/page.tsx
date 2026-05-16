@@ -102,7 +102,9 @@ export default function RunPage() {
 
   const onMessage = useCallback((payload: SSEEventPayload) => {
     if (payload.type === "sample") {
-      setSamples((prev) => [...prev, payload.data]);
+      // Cap to a sliding window of the last hour of 1-Hz samples so memory
+      // stays bounded on long-running tests.
+      setSamples((prev) => [...prev, payload.data].slice(-3600));
     } else if (payload.type === "state") {
       setLiveState(payload.data.state);
       void qc.invalidateQueries({ queryKey: ["run", runId] });

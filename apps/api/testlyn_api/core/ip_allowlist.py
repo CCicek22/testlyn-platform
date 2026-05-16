@@ -63,20 +63,26 @@ def _ip_in_cidr_list(ip_str: str, cidrs: list[str]) -> bool:
 
 
 def _extract_org_id(request: Request) -> str | None:
-    """Best-effort org_id extraction for allowlist keying (same logic as rate limiter)."""
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-        try:
-            import base64
-            import json
+    """Extract org_id for allowlist keying.
 
-            parts = token.split(".")
-            if len(parts) == 3:
-                payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
-                return payload.get("org_id") or payload.get("orgId")
-        except Exception:
-            pass
+    Security: never trusts an un-verified JWT payload. The Bearer token is
+    verified via ``token_verify.verify_token`` (Firebase signature + expiry).
+    Falls back to path-based extraction (``/v1/orgs/{org_id}/...``) when no
+    token is present — the org_id in the URL is still attacker-controlled
+    here, but the allowlist only restricts the request *more* (never opens
+    new access), so a forged path id can at most lock the caller out of an
+    org they have no real access to.
+    """
+    from testlyn_api.core.token_verify import extract_bearer, verify_token
+
+    token = extract_bearer(request.headers.get("Authorization", ""))
+    if token is not None:
+        claims = verify_token(token)
+        if claims is not None:
+            org_id = claims.get("org_id") or claims.get("orgId")
+            if org_id:
+                return str(org_id)
+
     # Path-based extraction: /v1/orgs/{org_id}/...
     path = request.url.path
     segments = path.split("/")

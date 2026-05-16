@@ -118,7 +118,7 @@ export default function InsightsPage() {
     staleTime: 5 * 60_000,
   });
 
-  const orgId = me?.memberships?.[0]?.org?.id ?? null;
+  const orgId = me?.memberships?.[0]?.org_id ?? null;
 
   const { data: snapshot, isLoading } = useQuery<InsightsSnapshot>({
     queryKey: ["insights", "latest", orgId],

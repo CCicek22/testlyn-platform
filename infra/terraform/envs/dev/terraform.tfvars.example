@@ -6,9 +6,11 @@ gcp_project_number = "123456789012"   # numeric project number, not the string I
 region             = "us-central1"
 env                = "dev"
 
-# Cloud SQL
-db_tier     = "db-f1-micro"
+# Postgres (live: self-hosted PgBouncer on db-vm VM 10.0.0.5)
 db_password = "CHANGE_ME"
+# Optional overrides — defaults in variables.tf point at live infra.
+# db_host   = "10.0.0.5"
+# redis_url = "redis://10.0.0.5:6379/0"
 
 # Container images (filled in by CI after first build)
 api_image    = "us-central1-docker.pkg.dev/example-project/testlyn/api:latest"

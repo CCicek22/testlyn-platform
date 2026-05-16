@@ -38,6 +38,96 @@ log = structlog.get_logger(__name__)
 # Transient error codes that trigger retry
 _TRANSIENT_CODES = {429, 500, 503}
 
+# Spec §5 columns sourced from k6 summary.json
+_SUMMARY_AGG_KEYS = (
+    "vus_max",
+    "iterations",
+    "http_reqs",
+    "http_failed",
+    "data_sent",
+    "data_received",
+)
+
+# Hard-4xx reasons returned by insert_rows_json that signal poison rows.
+# Per BQ docs: 'invalid' = schema mismatch / bad value; 'stopped' = batch
+# aborted because an earlier row failed.  Everything else (timeout, rate
+# limit, backend error) is treated as transient.
+_POISON_REASONS = frozenset({"invalid", "stopped"})
+
+
+def _extract_summary_aggregates(
+    summary: dict[str, Any] | None,
+) -> dict[str, int | None]:
+    """Pull the six spec §5 aggregate columns out of a k6 summary blob.
+
+    k6's `--summary-export` JSON wraps metrics under a top-level `metrics`
+    object; each entry has shape `{ "values": { "count": n, "max": m, ... } }`.
+    We extract:
+
+      * vus_max       ← metrics.vus_max.values.max  (or .value)
+      * iterations    ← metrics.iterations.values.count
+      * http_reqs     ← metrics.http_reqs.values.count
+      * http_failed   ← metrics.http_req_failed.values.fails (or .passes inv.)
+      * data_sent     ← metrics.data_sent.values.count
+      * data_received ← metrics.data_received.values.count
+
+    Missing keys → NULL.  k6 1.x and 2.x both use this layout; recheck on
+    major-version bumps (see CLAUDE.md §8 "Bumping a dependency").
+    """
+    out: dict[str, int | None] = dict.fromkeys(_SUMMARY_AGG_KEYS, None)
+    if not summary:
+        return out
+    metrics = summary.get("metrics") or {}
+    if not isinstance(metrics, dict):
+        return out
+
+    def _int(metric: str, *value_keys: str) -> int | None:
+        m = metrics.get(metric)
+        if not isinstance(m, dict):
+            return None
+        values = m.get("values")
+        if not isinstance(values, dict):
+            return None
+        for key in value_keys:
+            v = values.get(key)
+            if v is not None:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    out["vus_max"] = _int("vus_max", "max", "value")
+    out["iterations"] = _int("iterations", "count")
+    out["http_reqs"] = _int("http_reqs", "count")
+    out["http_failed"] = _int("http_req_failed", "fails")
+    out["data_sent"] = _int("data_sent", "count")
+    out["data_received"] = _int("data_received", "count")
+    return out
+
+
+def _row_insert_id(row: dict[str, Any]) -> str:
+    """Stable insertId per spec §7 — used as BQ dedup key.
+
+    Hash on the natural identity tuple: (run_id, metric, window_start,
+    tag_method, tag_status, tag_scenario, tag_group, tag_name).  Any retry
+    or spool-replay of the same row will collide on this ID, so BQ ignores
+    the duplicate even when the underlying buffer is replayed.
+    """
+    import hashlib
+
+    parts = (
+        str(row.get("run_id", "")),
+        str(row.get("metric", "")),
+        str(row.get("window_start", "")),
+        str(row.get("tag_method", "")),
+        str(row.get("tag_status", "")),
+        str(row.get("tag_scenario", "")),
+        str(row.get("tag_group", "")),
+        str(row.get("tag_name", "")),
+    )
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()
+
 
 class _BQInsertError(Exception):
     """Raised when insert_rows_json returns row-level errors."""
@@ -53,6 +143,27 @@ class _TransientBQError(Exception):
 
 class _PoisonBQError(Exception):
     """Hard 4xx (schema mismatch, auth, etc.) — do not retry."""
+
+
+class _PartialPoisonError(Exception):
+    """Row-level errors classified: some poison, some still good.
+
+    Raised from `_insert_rows_sync` when `insert_rows_json` returns row errors
+    that single out a subset of rows as unrecoverable.  The caller splits the
+    batch — poison rows go to `poison/`, surviving rows are re-inserted.
+    """
+
+    def __init__(
+        self,
+        *,
+        poison_rows: list[dict[str, Any]],
+        surviving_rows: list[dict[str, Any]],
+    ) -> None:
+        self.poison_rows = poison_rows
+        self.surviving_rows = surviving_rows
+        super().__init__(
+            f"partial poison: {len(poison_rows)} poison, {len(surviving_rows)} surviving"
+        )
 
 
 class BQWriter:
@@ -116,8 +227,22 @@ class BQWriter:
         status: str,
         summary_json: dict[str, Any] | None = None,
     ) -> None:
-        """Write a single row to the runs_summary table."""
-        row = {
+        """Write a single row to the runs_summary table.
+
+        Per spec §5 the row carries six aggregate columns sourced from k6's
+        `--summary-export` JSON (`vus_max`, `iterations`, `http_reqs`,
+        `http_failed`, `data_sent`, `data_received`).  If `summary_json` is
+        None or any key is missing, the column is written as NULL — a warning
+        is logged so an operator can spot misconfigured engine containers.
+        """
+        aggregates = _extract_summary_aggregates(summary_json)
+        if summary_json is None:
+            log.warning(
+                "sidecar.runs_summary_no_blob",
+                run_id=self._cfg.RUN_ID,
+            )
+
+        row: dict[str, Any] = {
             "run_id": self._cfg.RUN_ID,
             "org_id": self._cfg.ORG_ID,
             "product": self._cfg.PRODUCT,
@@ -126,6 +251,7 @@ class BQWriter:
             "finished_at": finished_at.isoformat(),
             "status": status,
             "summary_json": json.dumps(summary_json) if summary_json else None,
+            **aggregates,
         }
         await self._insert_with_retry([row], table_id=self._cfg.summary_table_id)
 
@@ -186,6 +312,19 @@ class BQWriter:
             )
             await self._spool.write(rows, poison=True)
             self._total_spool_incidents += 1
+        except _PartialPoisonError as exc:
+            # Split: poison rows go to poison/, surviving rows retry inline.
+            log.warning(
+                "sidecar.batch_split",
+                poison_count=len(exc.poison_rows),
+                surviving_count=len(exc.surviving_rows),
+            )
+            if exc.poison_rows:
+                await self._spool.write(exc.poison_rows, poison=True)
+                self._total_spool_incidents += 1
+            if exc.surviving_rows:
+                # Recurse: the surviving subset may itself fail and re-split.
+                await self._insert_with_retry(exc.surviving_rows, table_id=table_id)
 
     @retry(
         retry=retry_if_exception_type(_TransientBQError),
@@ -194,10 +333,15 @@ class BQWriter:
         reraise=True,
     )
     def _insert_rows_sync(self, rows: list[dict[str, Any]], table_id: str) -> None:
-        """Synchronous BQ insert — run via asyncio.to_thread."""
+        """Synchronous BQ insert — run via asyncio.to_thread.
+
+        Row IDs are computed from the natural identity tuple so retries +
+        spool replays dedup at BQ ingestion (spec §7).
+        """
         client = self._get_client()
+        row_ids = [_row_insert_id(r) for r in rows]
         try:
-            errors = client.insert_rows_json(table_id, rows)
+            errors = client.insert_rows_json(table_id, rows, row_ids=row_ids)
         except GoogleCloudError as exc:
             status = getattr(exc, "code", None)
             if status in _TRANSIENT_CODES or status is None:
@@ -205,8 +349,36 @@ class BQWriter:
             raise _PoisonBQError(str(exc)) from exc
 
         if errors:
-            # insert_rows_json returns a list of row-error dicts; treat as transient
-            # unless every error is a structural schema mismatch (which would be 400-class)
+            # Per BQ docs, `errors` is a list of {index, errors: [{reason, ...}]}.
+            # Split into poison vs surviving rows so we don't infinitely retry
+            # rows that will never succeed (schema mismatch, bad value).
+            poison_idx: set[int] = set()
+            for err in errors:
+                idx = err.get("index")
+                reasons = {e.get("reason") for e in (err.get("errors") or [])}
+                if idx is not None and (reasons & _POISON_REASONS):
+                    poison_idx.add(int(idx))
+
+            if poison_idx == set(range(len(rows))):
+                # Every row is poison — short-circuit to the poison branch.
+                log.error("sidecar.batch_all_poison", errors=errors[:3])
+                raise _PoisonBQError(str(errors))
+
+            if poison_idx:
+                poison_rows = [rows[i] for i in sorted(poison_idx)]
+                surviving = [r for i, r in enumerate(rows) if i not in poison_idx]
+                log.warning(
+                    "sidecar.batch_partial_poison",
+                    poison=len(poison_rows),
+                    surviving=len(surviving),
+                    sample_errors=errors[:3],
+                )
+                raise _PartialPoisonError(
+                    poison_rows=poison_rows,
+                    surviving_rows=surviving,
+                )
+
+            # No row was classified poison → treat the whole batch as transient.
             log.warning("sidecar.batch_failed", errors=errors[:3], action="retry")
             raise _TransientBQError(str(errors))
 

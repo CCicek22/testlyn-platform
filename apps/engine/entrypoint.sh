@@ -36,12 +36,30 @@ set -euo pipefail
 # Optional with defaults
 VUS="${VUS:-10}"
 DURATION="${DURATION:-30s}"
+MAX_VUS="${MAX_VUS:-50000}"
 SUMMARY_GCS_URI="${SUMMARY_GCS_URI:-gs://testlyn-prod-results/${ORG_ID}/${RUN_ID}/summary.json}"
 SPOOL_GCS_BUCKET="${SPOOL_GCS_BUCKET:-testlyn-prod-spool}"
 K6_OUTPUT_PATH="${K6_OUTPUT_PATH:-/tmp/k6.jsonl}"
+K6_SUMMARY_PATH="${K6_SUMMARY_PATH:-/tmp/work/summary.json}"
+EXIT_CODE_PATH="${EXIT_CODE_PATH:-/tmp/k6_exit_code}"
 WORK_DIR="${WORK_DIR:-/tmp/work}"
 
 mkdir -p "${WORK_DIR}"
+
+# ---------------------------------------------------------------------------
+# Clamp VUS to MAX_VUS (fix #13 of audit).
+# VUS arrives from the API as untrusted input; an unbounded value would let a
+# customer schedule a run that DoSes the worker (memory + file-descriptor
+# blow-up well before k6 itself errors).  MAX_VUS is operator-tunable.
+# ---------------------------------------------------------------------------
+if ! [[ "${VUS}" =~ ^[0-9]+$ ]]; then
+    echo "[entrypoint] VUS is not a non-negative integer: '${VUS}'" >&2
+    exit 2
+fi
+if [ "${VUS}" -gt "${MAX_VUS}" ]; then
+    echo "[entrypoint] requested VUS=${VUS} exceeds MAX_VUS=${MAX_VUS}" >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------------------------
 # Track sidecar PID and k6 exit code for cleanup
@@ -57,16 +75,32 @@ cleanup() {
     local final_status="failed"
     [ "${K6_EXIT}" -eq 0 ] && final_status="completed"
 
-    # Export for sidecar to read when writing runs_summary
+    # Persist the k6 exit code to a file the sidecar polls before writing
+    # runs_summary (fix #7 of audit).  The previous `export K6_EXIT_CODE` was
+    # racy: the sidecar already read its env at startup, long before k6 had
+    # exited.  The env var is kept for back-compat with the sidecar's
+    # fallback path in _read_exit_code().
+    echo "${K6_EXIT}" > "${EXIT_CODE_PATH}" || true
     export K6_EXIT_CODE="${K6_EXIT}"
 
     # Wait for sidecar to drain — 30 s hard cap per spec §8.
-    # timeout(1) sends SIGTERM; on expiry we escalate to SIGKILL.
+    # Fix #11 of audit: bash builtin `wait` does NOT respect the timeout(1)
+    # wrapper because timeout(1) execs a child for an external command, and
+    # `wait` is a shell builtin.  Poll with kill -0 + sleep + counter, then
+    # SIGKILL on expiry.
     if [ -n "${SIDECAR_PID}" ] && kill -0 "${SIDECAR_PID}" 2>/dev/null; then
         echo "[entrypoint] waiting for sidecar PID ${SIDECAR_PID} to drain (max 30s)..."
-        if ! timeout 30 wait "${SIDECAR_PID}" 2>/dev/null; then
+        local waited=0
+        while [ "${waited}" -lt 30 ]; do
+            if ! kill -0 "${SIDECAR_PID}" 2>/dev/null; then
+                break
+            fi
+            sleep 1
+            waited=$((waited + 1))
+        done
+        if kill -0 "${SIDECAR_PID}" 2>/dev/null; then
             echo "[entrypoint] sidecar did not drain within 30s — killing" >&2
-            kill -9 "${SIDECAR_PID}" 2>/dev/null || true
+            kill -KILL "${SIDECAR_PID}" 2>/dev/null || true
         fi
     fi
 
@@ -192,6 +226,10 @@ k6 run \
 K6_EXIT=$?
 set -e
 echo "[entrypoint] k6 exited with code ${K6_EXIT}"
+
+# Drop the exit code where the sidecar polls it (fix #7).  Also written in
+# cleanup() as a belt-and-braces in case of unusual exit paths.
+echo "${K6_EXIT}" > "${EXIT_CODE_PATH}" || true
 
 # ---------------------------------------------------------------------------
 # 5. Monitor sidecar — if it dies mid-run something is wrong

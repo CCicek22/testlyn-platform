@@ -39,13 +39,13 @@ variable "vpc_connector_id" {
 variable "cpu" {
   description = "CPU limit"
   type        = string
-  default     = "4000m"  # 4 vCPU per spec
+  default     = "4000m" # 4 vCPU per spec
 }
 
 variable "memory" {
   description = "Memory limit"
   type        = string
-  default     = "16Gi"   # 16 GB per spec
+  default     = "16Gi" # 16 GB per spec
 }
 
 variable "timeout_seconds" {

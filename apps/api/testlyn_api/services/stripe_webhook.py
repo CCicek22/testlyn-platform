@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from testlyn_api.config import get_settings
 from testlyn_api.models.org import Organization
 from testlyn_api.models.stripe_event import StripeEventLog
 
@@ -26,32 +26,34 @@ _STATUS_TO_PLAN: dict[str, str] = {
     "paused": "free",
 }
 
-_PRICE_TO_PLAN: dict[str, str] = {}  # populated from env at import time
 
+def _price_to_plan() -> dict[str, str]:
+    """Build price-id -> plan slug map from Settings on every call.
 
-def _load_price_map() -> None:
-    mapping = {
-        "STRIPE_PRICE_HOBBY": "hobby",
-        "STRIPE_PRICE_PRO": "pro",
-        "STRIPE_PRICE_BUSINESS": "business",
-    }
-    for env_key, plan in mapping.items():
-        price_id = os.environ.get(env_key, "")
-        if price_id:
-            _PRICE_TO_PLAN[price_id] = plan
-
-
-_load_price_map()
+    Cheap (one dict construction); avoids the import-time global that previously
+    cached env at module load and prevented Settings overrides from taking
+    effect during tests.
+    """
+    settings = get_settings()
+    mapping: dict[str, str] = {}
+    if settings.stripe_price_hobby:
+        mapping[settings.stripe_price_hobby] = "hobby"
+    if settings.stripe_price_pro:
+        mapping[settings.stripe_price_pro] = "pro"
+    if settings.stripe_price_business:
+        mapping[settings.stripe_price_business] = "business"
+    return mapping
 
 
 def _plan_from_subscription(sub: dict[str, Any]) -> str:
     status = sub.get("status", "")
+    price_to_plan = _price_to_plan()
     # Try to find plan from price id first
     items = sub.get("items", {}).get("data", [])
     for item in items:
         price_id = item.get("price", {}).get("id", "")
-        if price_id in _PRICE_TO_PLAN:
-            return _PRICE_TO_PLAN[price_id]
+        if price_id in price_to_plan:
+            return price_to_plan[price_id]
     return _STATUS_TO_PLAN.get(status, "free")
 
 
@@ -104,8 +106,11 @@ async def handle_event(
     """
     import stripe
 
-    secret_key = os.environ.get("STRIPE_SECRET_KEY", _PLACEHOLDER)
-    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    settings = get_settings()
+    secret_key = settings.stripe_secret_key
+    webhook_secret = settings.stripe_webhook_secret
+    if webhook_secret == "whsec_PLACEHOLDER":
+        webhook_secret = ""
 
     if secret_key == _PLACEHOLDER:
         log.warning(

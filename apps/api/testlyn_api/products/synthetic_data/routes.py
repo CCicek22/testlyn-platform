@@ -6,6 +6,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, status
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.products.synthetic_data.runner import SyntheticDataRunner
 from testlyn_api.products.synthetic_data.schemas import GenerateRequest, GenerateResponse
@@ -37,6 +38,16 @@ async def generate(
     reflects the schema, generates Faker rows respecting gdpr_masking_rules,
     and writes to GCS or inserts directly based on output_mode.
     """
+    # Verify caller belongs to body.org_id — otherwise an authenticated user
+    # could trigger synthetic-data jobs (and bill) against another tenant.
+    await _enforce_perm(
+        "run",
+        "test",
+        user_id=current_user.id,
+        org_id=body.org_id,
+        session=session,
+    )
+
     job_id = uuid.uuid4()
 
     result = await _runner.launch(

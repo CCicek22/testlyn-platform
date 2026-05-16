@@ -22,17 +22,22 @@ variable "env" {
   default     = "dev"
 }
 
-variable "db_tier" {
-  description = "Cloud SQL instance tier"
-  type        = string
-  default     = "db-f1-micro"
-}
-
 variable "db_password" {
-  description = "Postgres user password"
+  description = "Postgres user password (REQUIRED — sourced from TF_VAR_db_password / Secret Manager). No default to force explicit set."
   type        = string
   sensitive   = true
-  default     = "change-me-before-apply"
+}
+
+variable "db_host" {
+  description = "Postgres host. Live infra: self-hosted PgBouncer on db-vm VM (10.0.0.5)."
+  type        = string
+  default     = "10.0.0.5"
+}
+
+variable "redis_url" {
+  description = "Redis connection URL. Live infra: self-hosted Redis on db-vm VM."
+  type        = string
+  default     = "redis://10.0.0.5:6379/0"
 }
 
 variable "api_image" {

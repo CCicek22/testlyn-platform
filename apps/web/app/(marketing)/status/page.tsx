@@ -94,13 +94,12 @@ const FALLBACK: StatusResponse = {
   incidents: [],
 };
 
-const API_BASE =
-  typeof window !== "undefined"
-    ? (process.env["NEXT_PUBLIC_API_BASE_URL"] ?? "http://localhost:8080")
-    : "http://localhost:8080";
-
 async function fetchStatus(): Promise<StatusResponse> {
-  const res = await fetch(`${API_BASE}/v1/public/status`, {
+  // NEXT_PUBLIC_* values are inlined at build time and identical on the
+  // server and client — no need for a `typeof window` runtime gate.
+  const apiBase =
+    process.env["NEXT_PUBLIC_API_BASE_URL"] ?? "http://localhost:8080";
+  const res = await fetch(`${apiBase}/v1/public/status`, {
     next: { revalidate: 60 },
   });
   if (!res.ok) throw new Error(`status ${res.status}`);

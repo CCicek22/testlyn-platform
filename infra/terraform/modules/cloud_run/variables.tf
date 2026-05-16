@@ -30,8 +30,18 @@ variable "service_account_email" {
 }
 
 variable "vpc_connector_id" {
-  description = "VPC Access Connector ID"
+  description = "VPC Access Connector ID (legacy). Leave empty to use direct VPC egress via network_interfaces."
   type        = string
+  default     = ""
+}
+
+variable "network_interfaces" {
+  description = "Direct VPC egress network interfaces. Mutually exclusive with vpc_connector_id."
+  type = list(object({
+    network    = string
+    subnetwork = string
+  }))
+  default = []
 }
 
 variable "min_instances" {

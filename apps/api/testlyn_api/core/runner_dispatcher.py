@@ -89,36 +89,24 @@ class RunnerDispatcher:
         return result.scalar_one_or_none()
 
     async def _dispatch_docker(self, test_run_id: uuid.UUID) -> None:
-        """Fire-and-forget curl to the internal start endpoint (docker mode)."""
+        """Fire-and-forget POST to the internal start endpoint (docker mode)."""
         import asyncio
-        import subprocess
+
+        from testlyn_api.core.tasks import _post_internal
 
         settings = get_settings()
         url = f"{settings.api_base_url}/v1/internal/runs/{test_run_id}/start"
 
         async def _call() -> None:
-            proc = await asyncio.create_subprocess_exec(
-                "curl",
-                "-s",
-                "-X",
-                "POST",
-                url,
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                json.dumps({"run_id": str(test_run_id)}),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            _stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
+            try:
+                await _post_internal(url, {"run_id": str(test_run_id)})
+                log.info("dispatcher.docker_call_ok", run_id=str(test_run_id))
+            except Exception as exc:  # noqa: BLE001 — log + drop, fire-and-forget
                 log.warning(
                     "dispatcher.docker_call_failed",
                     run_id=str(test_run_id),
-                    stderr=stderr.decode(),
+                    error=str(exc),
                 )
-            else:
-                log.info("dispatcher.docker_call_ok", run_id=str(test_run_id))
 
         task = asyncio.create_task(_call())
         # Keep reference to avoid premature GC

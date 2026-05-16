@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     # --- Stripe ---
     stripe_secret_key: str = "sk_test_PLACEHOLDER"
     stripe_webhook_secret: str = "whsec_PLACEHOLDER"
+    # Price-id → plan mapping. Read by stripe_webhook to translate a
+    # subscription item's price id into a Testlyn plan slug. Empty in
+    # tests + local dev; populated via env / Secret Manager in cloud.
+    stripe_price_hobby: str = ""
+    stripe_price_pro: str = ""
+    stripe_price_business: str = ""
 
     # --- k6 ---
     k6_image_tag: str = "grafana/k6:1.3.0"

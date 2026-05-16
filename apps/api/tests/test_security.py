@@ -134,14 +134,14 @@ class TestZapScanSchemas:
 
 
 @pytest.mark.asyncio
-async def test_scan_baseline_returns_202(client: AsyncClient) -> None:
+async def test_scan_baseline_returns_202(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
     from unittest.mock import patch
 
     with patch("shutil.which", return_value=None):
         response = await client.post(
             "/v1/products/security/scan",
             json={
-                "org_id": str(uuid.uuid4()),
+                "org_id": str(dev_org_id),
                 "target_url": "https://example.com",
                 "scan_kind": "baseline",
             },
@@ -158,14 +158,14 @@ async def test_scan_baseline_returns_202(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scan_full_kind(client: AsyncClient) -> None:
+async def test_scan_full_kind(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
     from unittest.mock import patch
 
     with patch("shutil.which", return_value=None):
         response = await client.post(
             "/v1/products/security/scan",
             json={
-                "org_id": str(uuid.uuid4()),
+                "org_id": str(dev_org_id),
                 "target_url": "https://example.com",
                 "scan_kind": "full",
             },
@@ -175,7 +175,7 @@ async def test_scan_full_kind(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scan_with_auth_recipe(client: AsyncClient) -> None:
+async def test_scan_with_auth_recipe(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
     from unittest.mock import patch
 
     recipe_id = str(uuid.uuid4())
@@ -183,7 +183,7 @@ async def test_scan_with_auth_recipe(client: AsyncClient) -> None:
         response = await client.post(
             "/v1/products/security/scan",
             json={
-                "org_id": str(uuid.uuid4()),
+                "org_id": str(dev_org_id),
                 "target_url": "https://example.com",
                 "auth_recipe_id": recipe_id,
                 "scan_kind": "full",

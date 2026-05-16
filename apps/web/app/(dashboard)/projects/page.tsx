@@ -15,7 +15,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Project } from "@testlyn/shared";
+import { useAuth } from "@/components/auth/auth-provider";
+import type { Project, MeResponse } from "@testlyn/shared";
 
 function ProjectCard({ project }: { project: Project }) {
   return (
@@ -42,9 +43,11 @@ function ProjectCard({ project }: { project: Project }) {
 function NewProjectDialog({
   open,
   onClose,
+  orgId,
 }: {
   open: boolean;
   onClose: () => void;
+  orgId: string;
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
@@ -52,10 +55,10 @@ function NewProjectDialog({
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: (orgId: string) =>
+    mutationFn: () =>
       api.orgs.createProject(orgId, { name, description: description || undefined }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["projects"] });
+      void qc.invalidateQueries({ queryKey: ["projects", orgId] });
       setName("");
       setDescription("");
       setError(null);
@@ -69,8 +72,7 @@ function NewProjectDialog({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    // TODO: use real org ID from auth context; dev-bypass uses placeholder
-    mutation.mutate("dev-org");
+    mutation.mutate();
   }
 
   return (
@@ -130,15 +132,27 @@ function NewProjectDialog({
 }
 
 export default function ProjectsPage() {
+  const { user } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // TODO: resolve org ID from user session; hard-coded to "dev-org" for DEV_BYPASS
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => api.orgs.projects("dev-org"),
+  // Resolve org id from auth context via /v1/me — never hardcode.
+  const { data: me } = useQuery<MeResponse>({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: user != null,
+    staleTime: 5 * 60_000,
+  });
+  const orgId = me?.memberships?.[0]?.org_id ?? null;
+
+  const { data, isLoading, error } = useQuery<Project[]>({
+    queryKey: ["projects", orgId],
+    queryFn: () => api.orgs.projects(orgId!),
+    enabled: orgId != null,
   });
 
-  const projects = (data as { items: Project[] } | undefined)?.items ?? [];
+  const projects = data ?? [];
+
+  const projectsLoading = orgId == null || isLoading;
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
@@ -149,7 +163,10 @@ export default function ProjectsPage() {
             Organize your load tests by project.
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>
+        <Button
+          onClick={() => setDialogOpen(true)}
+          disabled={orgId == null}
+        >
           <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -157,7 +174,7 @@ export default function ProjectsPage() {
         </Button>
       </div>
 
-      {isLoading && (
+      {projectsLoading && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-36 rounded-xl bg-zinc-800" />
@@ -171,7 +188,7 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {!isLoading && !error && projects.length === 0 && (
+      {!projectsLoading && !error && projects.length === 0 && (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-700 py-20 text-center">
           <svg
             className="mb-4 h-10 w-10 text-zinc-600"
@@ -192,7 +209,7 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {!isLoading && !error && projects.length > 0 && (
+      {!projectsLoading && !error && projects.length > 0 && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
             <ProjectCard key={project.id} project={project} />
@@ -200,7 +217,13 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      <NewProjectDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      {orgId != null && (
+        <NewProjectDialog
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          orgId={orgId}
+        />
+      )}
     </div>
   );
 }

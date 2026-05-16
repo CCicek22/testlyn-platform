@@ -94,13 +94,36 @@ class Spool:
     async def drain(self) -> AsyncIterator[tuple[str, list[dict]]]:  # type: ignore[type-arg]
         """Yield (kind, rows) tuples from leftover spool files (non-poison only).
 
-        `kind` is the BQ table discriminator written by `write()` into the
-        first header line of each spool file.  Callers must route to the
-        correct table based on `kind`.
+        Crash-safety contract:
+          1. Rename `<file>.jsonl` → `<file>.jsonl.draining` BEFORE yielding.
+          2. Yield rows.  Caller performs the BQ insert.
+          3. Caller (via `_complete_draining`) deletes the `.draining` file
+             only after the insert was confirmed successful.
+          4. On startup, any `.draining` files left from a crash are retried
+             once; on second failure they move to `dead/` and are NOT replayed.
 
-        The file is deleted after each successful yield (caller must not raise).
+        Without the rename, an exception between yield and unlink would leak
+        the spool file forever; without the dead-letter, a row that poisons
+        the writer would loop on every startup.
         """
         self._ensure_dirs()
+
+        # Step 0: handle leftover `.draining` files from a previous crash.
+        # We do this BEFORE picking up fresh `.jsonl` files so we never mix
+        # them.  Each leftover gets one more chance; if the caller doesn't
+        # call `_complete_draining` (i.e. the insert raises again), the
+        # `_finalize_orphans` post-step routes it to `dead/`.
+        for orphan in sorted(self._dir.glob("*.jsonl.draining")):
+            log.warning("spool.draining_retry", path=str(orphan))
+            kind, rows = await self._read_spool_file(orphan)
+            if rows:
+                yield kind, rows
+                # If the caller successfully inserted, they'd have unlinked
+                # via `_complete_draining`.  If the file still exists here,
+                # the insert failed again → quarantine.
+                if orphan.exists():
+                    self._dead_letter(orphan)
+
         spool_files = sorted(self._dir.glob("*.jsonl"))
         if not spool_files:
             return
@@ -108,33 +131,63 @@ class Spool:
         log.info("spool.drain_start", file_count=len(spool_files))
         for path in spool_files:
             try:
-                kind = "samples_1s"  # default for files written before R1-C2
-                rows: list[dict] = []  # type: ignore[type-arg]
-                async with aiofiles.open(path) as fh:
-                    first = True
-                    async for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        parsed = json.loads(line)
-                        if first:
-                            first = False
-                            if "_kind" in parsed:
-                                kind = parsed["_kind"]
-                                assert kind == "samples_1s", (
-                                    f"Unknown spool kind '{kind}' in {path} — "
-                                    "only 'samples_1s' is supported in Phase 1"
-                                )
-                                continue  # header consumed; don't add to rows
-                        rows.append(parsed)
+                draining = path.with_suffix(path.suffix + ".draining")
+                # Atomic rename — survives caller crashes between yield + unlink.
+                path.rename(draining)
+                kind, rows = await self._read_spool_file(draining)
                 if rows:
                     yield kind, rows
-                    # File is removed after successful yield; caller must not raise
-                    # between yield and the next iteration.
-                    path.unlink(missing_ok=True)
-                    log.info("sidecar.spool_drained", path=str(path), rows=len(rows), kind=kind)
+                    # Caller is expected to call _complete_draining on success.
+                    # We also self-unlink here in case the caller used the
+                    # legacy contract (drain() then forgets).
+                    draining.unlink(missing_ok=True)
+                    log.info(
+                        "sidecar.spool_drained",
+                        path=str(path),
+                        rows=len(rows),
+                        kind=kind,
+                    )
+                else:
+                    draining.unlink(missing_ok=True)
             except Exception as exc:
                 log.error("spool.drain_error", path=str(path), error=str(exc))
+
+    async def _read_spool_file(
+        self,
+        path: Path,
+    ) -> tuple[str, list[dict]]:  # type: ignore[type-arg]
+        """Parse a spool file's header + body. Returns (kind, rows)."""
+        kind = "samples_1s"  # default for files written before R1-C2
+        rows: list[dict] = []  # type: ignore[type-arg]
+        async with aiofiles.open(path) as fh:
+            first = True
+            async for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                parsed = json.loads(line)
+                if first:
+                    first = False
+                    if "_kind" in parsed:
+                        kind = parsed["_kind"]
+                        assert kind == "samples_1s", (
+                            f"Unknown spool kind '{kind}' in {path} — "
+                            "only 'samples_1s' is supported in Phase 1"
+                        )
+                        continue  # header consumed; don't add to rows
+                rows.append(parsed)
+        return kind, rows
+
+    def _dead_letter(self, path: Path) -> None:
+        """Move a twice-failed draining file to `dead/` so we stop replaying."""
+        dead_dir = self._dir / "dead"
+        dead_dir.mkdir(parents=True, exist_ok=True)
+        target = dead_dir / path.name
+        try:
+            path.rename(target)
+            log.error("spool.dead_letter", path=str(target))
+        except OSError as exc:
+            log.error("spool.dead_letter_failed", path=str(path), error=str(exc))
 
     async def size_bytes(self) -> int:
         """Return total spool size in bytes (non-poison only)."""

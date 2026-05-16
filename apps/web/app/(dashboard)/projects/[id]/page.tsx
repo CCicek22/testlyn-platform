@@ -39,13 +39,13 @@ export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
 
-  const { data: tests, isLoading, error } = useQuery({
+  const { data: tests, isLoading, error } = useQuery<Test[]>({
     queryKey: ["tests", projectId],
     queryFn: () => api.projects.tests(projectId),
     enabled: !!projectId,
   });
 
-  const testList = (tests as { items: Test[] } | undefined)?.items ?? [];
+  const testList = tests ?? [];
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">

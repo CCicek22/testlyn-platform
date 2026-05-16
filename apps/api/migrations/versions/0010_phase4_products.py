@@ -138,6 +138,13 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", "ts"),
         postgresql_partition_by="RANGE (ts)",
     )
+    # DEFAULT partition catches all rows until time-range partitions are
+    # provisioned out-of-band (cron + pg_partman or similar). Without this,
+    # the first INSERT after create_table fails with "no partition of
+    # relation rum_pageviews found for row".
+    op.execute(
+        sa.text("CREATE TABLE rum_pageviews_default PARTITION OF rum_pageviews DEFAULT")
+    )
     op.create_index("ix_rum_pageviews_site_id_ts", "rum_pageviews", ["site_id", "ts"])
 
     # ------------------------------------------------------------------
@@ -271,6 +278,9 @@ def downgrade() -> None:
     op.execute("DROP TYPE IF EXISTS tdm_job_status")
 
     op.drop_index("ix_rum_pageviews_site_id_ts", table_name="rum_pageviews")
+    # Drop DEFAULT partition first (DROP TABLE on partitioned parent
+    # cascades, but be explicit for symmetry with upgrade()).
+    op.execute(sa.text("DROP TABLE IF EXISTS rum_pageviews_default"))
     op.drop_table("rum_pageviews")
 
     op.drop_index("ix_rum_sites_org_id", table_name="rum_sites")

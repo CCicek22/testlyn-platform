@@ -250,9 +250,29 @@ class TestGenerateRemediation:
 
 
 @pytest.mark.asyncio
-async def test_one_shot_audit_enqueued(client: AsyncClient) -> None:
+async def test_one_shot_audit_enqueued(
+    client: AsyncClient,
+    db_session,
+    dev_org_id: uuid.UUID,
+) -> None:
     """POST /v1/products/a11y/audit returns 202 with runner_id."""
-    run_id = str(uuid.uuid4())
+    # Seed a run owned by the dev org so the new ownership check passes.
+    from testlyn_api.models.project import Project
+    from testlyn_api.models.test import Test as TestModel
+    from testlyn_api.models.test_run import TestRun as TestRunModel
+
+    project = Project(org_id=dev_org_id, name="P", slug="p-a11y")
+    db_session.add(project)
+    await db_session.flush()
+    test = TestModel(project_id=project.id, name="T", script_inline="x")
+    db_session.add(test)
+    await db_session.flush()
+    run = TestRunModel(test_id=test.id, product="a11y")
+    db_session.add(run)
+    await db_session.flush()
+    run_id = str(run.id)
+    await db_session.commit()
+
     response = await client.post(
         "/v1/products/a11y/audit",
         json={

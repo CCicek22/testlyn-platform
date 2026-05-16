@@ -4,11 +4,10 @@ import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type { AuditLogEntry, AuditListParams } from "@/lib/api-client";
+import { useAuth } from "@/components/auth/auth-provider";
+import type { MeResponse } from "@testlyn/shared";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-// TODO: resolve from user session; matches DEV_AUTH_BYPASS org
-const DEV_ORG_ID = "dev-org";
 
 const KNOWN_ACTIONS = [
   "org.created",
@@ -187,11 +186,21 @@ function triggerDownload(blob: Blob, filename: string) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AuditLogPage() {
+  const { user } = useAuth();
   const [actionFilter, setActionFilter] = useState<string | null>(null);
   const [fromDt, setFromDt] = useState("");
   const [toDt, setToDt] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [exporting, setExporting] = useState<"csv" | "json" | null>(null);
+
+  // Resolve org id from auth context via /v1/me — never hardcode.
+  const { data: me } = useQuery<MeResponse>({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: user != null,
+    staleTime: 5 * 60_000,
+  });
+  const orgId = me?.memberships?.[0]?.org_id ?? null;
 
   const params: AuditListParams = {
     limit: PAGE_LIMIT,
@@ -202,12 +211,14 @@ export default function AuditLogPage() {
   };
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["audit-log", DEV_ORG_ID, params],
-    queryFn: () => api.audit.list(DEV_ORG_ID, params),
+    queryKey: ["audit-log", orgId, params],
+    queryFn: () => api.audit.list(orgId!, params),
+    enabled: orgId != null,
   });
 
   const handleExport = useCallback(
     async (format: "csv" | "json") => {
+      if (orgId == null) return;
       setExporting(format);
       try {
         const exportParams = {
@@ -218,8 +229,8 @@ export default function AuditLogPage() {
         };
         const res =
           format === "csv"
-            ? await api.audit.exportCsv(DEV_ORG_ID, exportParams)
-            : await api.audit.exportJson(DEV_ORG_ID, exportParams);
+            ? await api.audit.exportCsv(orgId, exportParams)
+            : await api.audit.exportJson(orgId, exportParams);
         const blob = await res.blob();
         const ts = new Date().toISOString().slice(0, 10);
         triggerDownload(blob, `audit-log-${ts}.${format}`);
@@ -227,7 +238,7 @@ export default function AuditLogPage() {
         setExporting(null);
       }
     },
-    [actionFilter, fromDt, toDt]
+    [actionFilter, fromDt, toDt, orgId]
   );
 
   const entries = data?.items ?? [];
@@ -238,6 +249,19 @@ export default function AuditLogPage() {
     setFromDt("");
     setToDt("");
     setCursor(null);
+  }
+
+  if (orgId == null) {
+    return (
+      <div className="mx-auto max-w-7xl px-6 py-8">
+        <h1 className="text-2xl font-bold tracking-tight text-zinc-100">
+          Audit Log
+        </h1>
+        <p className="mt-4 text-sm text-zinc-500">
+          {me == null ? "Loading organization…" : "No organization available."}
+        </p>
+      </div>
+    );
   }
 
   return (

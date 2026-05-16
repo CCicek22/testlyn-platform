@@ -6,7 +6,7 @@ variable "region" {
       asia-southeast1   — Singapore (APAC data residency)
     Additional regions added in Phase 4 GA based on customer demand.
   EOT
-  type = string
+  type        = string
 
   validation {
     condition = contains(

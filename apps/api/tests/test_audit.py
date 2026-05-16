@@ -52,7 +52,8 @@ async def test_create_run_writes_audit_row(
 ) -> None:
     from testlyn_api.core import tasks
 
-    monkeypatch.setattr(tasks, "enqueue_run", lambda _: None)
+    async def _noop(_): pass
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
 
     org_id, _, test_id = await _scaffold_org_project_test(client)
 
@@ -188,7 +189,8 @@ async def test_quota_exceeded_blocks_run(
 
     from testlyn_api.core import tasks
 
-    monkeypatch.setattr(tasks, "enqueue_run", lambda _: None)
+    async def _noop(_): pass
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
 
     org_id, _, test_id = await _scaffold_org_project_test(client)
 

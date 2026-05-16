@@ -108,8 +108,8 @@ class TestGenerateSchemas:
 
 
 @pytest.mark.asyncio
-async def test_generate_returns_202(client: AsyncClient) -> None:
-    org_id = str(uuid.uuid4())
+async def test_generate_returns_202(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
+    org_id = str(dev_org_id)
     response = await client.post(
         "/v1/products/synthetic-data/generate",
         json={
@@ -128,11 +128,11 @@ async def test_generate_returns_202(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_with_overrides(client: AsyncClient) -> None:
+async def test_generate_with_overrides(client: AsyncClient, dev_org_id: uuid.UUID) -> None:
     response = await client.post(
         "/v1/products/synthetic-data/generate",
         json={
-            "org_id": str(uuid.uuid4()),
+            "org_id": str(dev_org_id),
             "dsn_secret_id": "secret-id",
             "schema_overrides": {"users": {"email": "email"}},
             "gdpr_masking_rules": {"users.phone": "mask"},

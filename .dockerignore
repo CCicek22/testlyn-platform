@@ -1,0 +1,46 @@
+# Repo-root .dockerignore — applies to every `docker build` using repo root as
+# context (apps/api/Dockerfile, apps/web/Dockerfile). Service-specific
+# Dockerfiles with their own contexts (apps/engine) get their own local
+# .dockerignore if needed.
+
+# VCS / CI
+.git
+.gitignore
+.github
+
+# Tooling / agent state
+.claude
+.claude/worktrees
+.worktreeinclude
+
+# Node
+node_modules
+.next
+.cache
+.turbo
+
+# Python
+.venv
+venv
+**/__pycache__
+**/*.pyc
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+
+# Logs / temp
+*.log
+tmp
+.DS_Store
+
+# Secrets — never bake into images
+.env
+.env.*
+!.env.example
+
+# Repo content not needed at runtime
+infra/
+docs/
+# NOTE: pnpm-lock.yaml IS needed by apps/web/Dockerfile install layer
+# (`pnpm install --frozen-lockfile` reads it). Do NOT exclude.
+# Same for uv.lock (apps/api/Dockerfile uses `uv sync --frozen`).
