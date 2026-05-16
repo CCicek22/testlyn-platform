@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from testlyn_api.config import get_settings
+from testlyn_api.core.firebase import init_firebase
 from testlyn_api.core.ip_allowlist import IPAllowlistMiddleware
 from testlyn_api.core.rate_limit import RateLimitMiddleware
 from testlyn_api.products.a11y.routes import router as a11y_router
@@ -64,6 +65,7 @@ app = FastAPI(
 )
 
 settings = get_settings()
+init_firebase()
 
 app.add_middleware(
     CORSMiddleware,
