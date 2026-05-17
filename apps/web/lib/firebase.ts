@@ -44,12 +44,22 @@ if (!DEV_BYPASS) {
 
 // ─── Token retrieval ───────────────────────────────────────────────────────
 
-/** Returns the IdP JWT, or a static fake token in dev-bypass mode. */
+/** Returns the IdP JWT, or a static fake token in dev-bypass mode.
+ *
+ * Awaits `authStateReady()` so callers don't race the IndexedDB restore on
+ * page navigation — without this, the first React Query on a freshly mounted
+ * route can see `currentUser === null` for ~10ms after a hard reload and
+ * throw UnauthenticatedError, which surfaces as a query error and (because
+ * `AuthProvider` is still hydrating) can briefly flash an empty page before
+ * the user state settles.
+ */
 export async function getIdToken(): Promise<string | null> {
   if (DEV_BYPASS) {
     return "dev-bypass-token";
   }
-  const user = auth?.currentUser;
+  if (!auth) return null;
+  await auth.authStateReady();
+  const user = auth.currentUser;
   if (!user) return null;
   return user.getIdToken();
 }

@@ -1,25 +1,18 @@
-import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import { UnauthenticatedError } from "@/lib/api-client";
 
 /**
- * R5-C4: Global UnauthenticatedError handler.
- * When any query throws UnauthenticatedError (null token, not in dev-bypass),
- * redirect to /login. React Query v5 requires onError on QueryCache directly
- * rather than defaultOptions (the v4 global callback was removed).
+ * Redirect on signed-out state is owned by AuthProvider + DashboardShell
+ * (which subscribe to onAuthStateChanged and replace to /login when the user
+ * truly becomes null). Doing it here as well caused spurious logouts on page
+ * navigation when a query fired before Firebase finished its IndexedDB
+ * restore — getIdToken() now awaits authStateReady(), but we still don't
+ * retry on auth failures so the UI surfaces them cleanly.
  */
 export const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError(error) {
-      if (error instanceof UnauthenticatedError) {
-        // Use replace so the user can't back-navigate into the protected page.
-        window.location.replace("/login");
-      }
-    },
-  }),
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      // Do not retry on auth failures — redirect immediately.
       retry: (failureCount, error) =>
         error instanceof UnauthenticatedError ? false : failureCount < 1,
       refetchOnWindowFocus: false,
