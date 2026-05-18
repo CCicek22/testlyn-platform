@@ -25,9 +25,11 @@ export interface User {
   email: string;
   name: string;
   avatar_url: string | null;
-  firebase_uid: string | null;
+  /** Not yet emitted by API — declared optional for forward-compat. */
+  firebase_uid?: string | null;
   created_at: string; // ISO-8601
-  updated_at: string;
+  /** Not yet emitted by API — declared optional for forward-compat. */
+  updated_at?: string;
 }
 
 export interface Org {
@@ -35,9 +37,11 @@ export interface Org {
   name: string;
   slug: string;
   plan: OrgPlan;
-  stripe_customer_id: string | null;
+  /** Not yet emitted by API — declared optional for forward-compat. */
+  stripe_customer_id?: string | null;
   created_at: string;
-  updated_at: string;
+  /** Not yet emitted by API — declared optional for forward-compat. */
+  updated_at?: string;
 }
 
 export interface OrgMember {
@@ -58,10 +62,9 @@ export interface Project {
 }
 
 export interface TestConfig {
-  script: string;
   vus: number;
   /** Duration in seconds */
-  duration: number;
+  duration_seconds: number;
   thresholds: Record<string, string[]>;
 }
 
@@ -70,8 +73,10 @@ export interface Test {
   project_id: string;
   name: string;
   product: TestProduct;
+  script_uri: string | null;
+  script_inline: string | null;
   config: TestConfig;
-  created_by: string; // user id
+  created_by: string | null; // user id
   created_at: string;
   updated_at: string;
 }
@@ -111,11 +116,13 @@ export interface CreateProjectRequest {
 export interface CreateTestRequest {
   name: string;
   product: TestProduct;
+  script_inline?: string | null;
   config: TestConfig;
 }
 
 export interface PatchTestRequest {
   name?: string;
+  script_inline?: string | null;
   config?: Partial<TestConfig>;
 }
 

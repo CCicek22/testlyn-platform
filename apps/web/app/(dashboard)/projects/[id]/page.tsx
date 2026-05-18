@@ -15,7 +15,7 @@ function TestRow({ test }: { test: Test }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-zinc-100">{test.name}</p>
         <p className="text-xs text-zinc-500">
-          {test.config.vus} VUs · {test.config.duration}s ·{" "}
+          {test.config.vus} VUs · {test.config.duration_seconds}s ·{" "}
           {new Date(test.created_at).toLocaleDateString()}
         </p>
       </div>

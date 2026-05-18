@@ -36,8 +36,8 @@ export default function EditTestPage() {
     if (test) {
       setName(test.name);
       setVus(test.config.vus);
-      setDuration(test.config.duration);
-      setScript(test.config.script);
+      setDuration(test.config.duration_seconds);
+      setScript(test.script_inline ?? "");
     }
   }, [test]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -58,10 +58,10 @@ export default function EditTestPage() {
     setFormError(null);
     mutation.mutate({
       name,
+      script_inline: script,
       config: {
-        script,
         vus,
-        duration,
+        duration_seconds: duration,
         thresholds: test?.config.thresholds ?? {},
       },
     });

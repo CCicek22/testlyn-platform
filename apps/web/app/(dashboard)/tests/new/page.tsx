@@ -77,10 +77,10 @@ export default function NewTestPage() {
     mutation.mutate({
       name,
       product: "load",
+      script_inline: script,
       config: {
-        script,
         vus,
-        duration,
+        duration_seconds: duration,
         thresholds: {},
       },
     });

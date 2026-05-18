@@ -182,7 +182,7 @@ export default function RunPage() {
 
           {run && (
             <p className="mt-1 text-sm text-zinc-500">
-              {run.config.vus} VUs · {run.config.duration}s ·{" "}
+              {run.config.vus} VUs · {run.config.duration_seconds}s ·{" "}
               Started {new Date(run.started_at ?? run.created_at).toLocaleString()}
             </p>
           )}
