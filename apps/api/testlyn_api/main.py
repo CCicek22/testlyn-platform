@@ -113,6 +113,6 @@ app.include_router(enterprise.router)
 app.include_router(graphql_router)
 
 
-@app.get("/healthz", include_in_schema=False)
-async def healthz() -> dict[str, str]:
+@app.get("/health", include_in_schema=False)
+async def health() -> dict[str, str]:
     return {"status": "ok"}
