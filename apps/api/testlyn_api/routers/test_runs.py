@@ -5,6 +5,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from testlyn_api.core import tasks as tasks_module
 from testlyn_api.core.permissions import _enforce_perm
@@ -86,7 +87,7 @@ async def create_run(
     await tasks_module.enqueue_run(run.id)
 
     log.info("run.created", run_id=str(run.id), test_id=str(test_id))
-    return RunOut.model_validate(run)
+    return RunOut.from_run_and_test(run, test)
 
 
 @router.get("/runs", response_model=list[RunOut])
@@ -102,9 +103,13 @@ async def list_runs(
     if product is not None:
         clauses.append(TestRun.product == product)
     result = await session.execute(
-        select(TestRun).where(and_(*clauses)).order_by(TestRun.id.desc()).limit(200)
+        select(TestRun)
+        .options(joinedload(TestRun.test))
+        .where(and_(*clauses))
+        .order_by(TestRun.id.desc())
+        .limit(200)
     )
-    return [RunOut.model_validate(r) for r in result.scalars().all()]
+    return [RunOut.from_run_and_test(r, r.test) for r in result.unique().scalars().all()]
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
@@ -122,7 +127,7 @@ async def get_run(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     await _enforce_perm("read", "test_run", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
-    return RunOut.model_validate(run)
+    return RunOut.from_run_and_test(run, test)
 
 
 @router.get("/runs/{run_id}/summary")
@@ -178,7 +183,7 @@ async def cancel_run(
     await session.refresh(run)
 
     log.info("run.cancelled", run_id=str(run_id), user_id=str(current_user.id))
-    return RunOut.model_validate(run)
+    return RunOut.from_run_and_test(run, test)
 
 
 async def _get_test_or_404(test_id: uuid.UUID, session: SessionDep) -> Test:

@@ -99,7 +99,7 @@ async def start_run(
     await session.refresh(run)
 
     log.info("run.started", run_id=str(run_id), state=run.state)
-    return RunOut.model_validate(run)
+    return RunOut.from_run_and_test(run, test)
 
 
 @router.post("/runs/{run_id}/complete", response_model=RunOut)
@@ -118,6 +118,11 @@ async def complete_run(
             detail=f"Run is in state {run.state!r}, cannot complete",
         )
 
+    test_result = await session.execute(select(Test).where(Test.id == run.test_id))
+    test = test_result.scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+
     run.finished_at = datetime.now(tz=UTC)
     run.summary_uri = body.summary_uri
     run.error_reason = body.error_reason
@@ -133,7 +138,7 @@ async def complete_run(
     await session.refresh(run)
 
     log.info("run.completed", run_id=str(run_id), state=run.state)
-    return RunOut.model_validate(run)
+    return RunOut.from_run_and_test(run, test)
 
 
 async def _get_run_or_404(run_id: uuid.UUID, session: SessionDep) -> TestRun:

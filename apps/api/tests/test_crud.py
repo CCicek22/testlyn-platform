@@ -126,6 +126,119 @@ async def test_get_run(client: AsyncClient, monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# RunOut config field tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_run_response_includes_config(client: AsyncClient, monkeypatch) -> None:
+    """POST /v1/tests/{id}/runs → RunOut.config is populated from the parent Test."""
+    from testlyn_api.core import tasks
+
+    async def _noop(_run_id):
+        pass
+
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
+
+    org_resp = await client.post("/v1/orgs", json={"name": "ConfigOrg1"})
+    org_id = org_resp.json()["id"]
+    proj_resp = await client.post(
+        f"/v1/orgs/{org_id}/projects", json={"name": "ConfigProj1", "slug": "config-proj-1"}
+    )
+    proj_id = proj_resp.json()["id"]
+    test_resp = await client.post(
+        f"/v1/projects/{proj_id}/tests",
+        json={
+            "name": "Config run test",
+            "script_inline": "export default function() {}",
+            "config": {"vus": 5, "duration_seconds": 120},
+        },
+    )
+    assert test_resp.status_code == 201
+    test_id = test_resp.json()["id"]
+
+    run_resp = await client.post(f"/v1/tests/{test_id}/runs", json={})
+    assert run_resp.status_code == 201
+    data = run_resp.json()
+    assert "config" in data
+    assert data["config"]["vus"] == 5
+    assert data["config"]["duration_seconds"] == 120
+
+
+@pytest.mark.asyncio
+async def test_get_run_response_includes_config(client: AsyncClient, monkeypatch) -> None:
+    """GET /v1/runs/{id} → RunOut.config is populated from the parent Test."""
+    from testlyn_api.core import tasks
+
+    async def _noop(_run_id):
+        pass
+
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
+
+    org_resp = await client.post("/v1/orgs", json={"name": "ConfigOrg2"})
+    org_id = org_resp.json()["id"]
+    proj_resp = await client.post(
+        f"/v1/orgs/{org_id}/projects", json={"name": "ConfigProj2", "slug": "config-proj-2"}
+    )
+    proj_id = proj_resp.json()["id"]
+    test_resp = await client.post(
+        f"/v1/projects/{proj_id}/tests",
+        json={
+            "name": "Get run config test",
+            "script_inline": "export default function() {}",
+            "config": {"vus": 3, "duration_seconds": 60},
+        },
+    )
+    test_id = test_resp.json()["id"]
+    run_resp = await client.post(f"/v1/tests/{test_id}/runs", json={})
+    run_id = run_resp.json()["id"]
+
+    get_resp = await client.get(f"/v1/runs/{run_id}")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert "config" in data
+    assert data["config"]["vus"] == 3
+    assert data["config"]["duration_seconds"] == 60
+
+
+@pytest.mark.asyncio
+async def test_list_runs_response_includes_config(client: AsyncClient, monkeypatch) -> None:
+    """GET /v1/runs?product=load → each RunOut.config is populated from its parent Test."""
+    from testlyn_api.core import tasks
+
+    async def _noop(_run_id):
+        pass
+
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
+
+    org_resp = await client.post("/v1/orgs", json={"name": "ConfigOrg3"})
+    org_id = org_resp.json()["id"]
+    proj_resp = await client.post(
+        f"/v1/orgs/{org_id}/projects", json={"name": "ConfigProj3", "slug": "config-proj-3"}
+    )
+    proj_id = proj_resp.json()["id"]
+    test_resp = await client.post(
+        f"/v1/projects/{proj_id}/tests",
+        json={
+            "name": "List runs config test",
+            "script_inline": "export default function() {}",
+            "config": {"vus": 10, "duration_seconds": 300},
+        },
+    )
+    test_id = test_resp.json()["id"]
+    await client.post(f"/v1/tests/{test_id}/runs", json={})
+
+    list_resp = await client.get("/v1/runs?product=load")
+    assert list_resp.status_code == 200
+    runs = list_resp.json()
+    assert len(runs) >= 1
+    run = next(r for r in runs if r["test_id"] == test_id)
+    assert "config" in run
+    assert run["config"]["vus"] == 10
+    assert run["config"]["duration_seconds"] == 300
+
+
+# ---------------------------------------------------------------------------
 # Negative-path (404 / 422) tests
 # ---------------------------------------------------------------------------
 

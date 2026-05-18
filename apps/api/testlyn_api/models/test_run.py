@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from testlyn_api.core.db import Base
+
+if TYPE_CHECKING:
+    from testlyn_api.models.test import Test
 
 
 class TestRun(Base):
@@ -16,6 +20,7 @@ class TestRun(Base):
     test_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tests.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    test: Mapped[Test] = relationship("Test", lazy="raise")
     # discriminator — mirrors Test.product; never remove
     product: Mapped[str] = mapped_column(String(64), nullable=False, default="load", index=True)
     state: Mapped[str] = mapped_column(
