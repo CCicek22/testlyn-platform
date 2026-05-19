@@ -146,19 +146,33 @@ function frameToEvent(frame: ParsedFrame): ChatEvent | null {
 export async function streamChat(opts: StreamChatOptions): Promise<void> {
   const { message, sessionId, signal, onEvent } = opts;
 
-  const token = await getIdToken();
+  let token = await getIdToken();
   if (!token) throw new Error("unauthenticated");
 
-  const res = await fetch(`${CHAT_BASE_URL}/chat/stream`, {
+  const fetchOpts = {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
     body: JSON.stringify({ message, session_id: sessionId }),
     signal,
+  };
+
+  let res = await fetch(`${CHAT_BASE_URL}/chat/stream`, {
+    ...fetchOpts,
+    headers: { ...fetchOpts.headers, Authorization: `Bearer ${token}` },
   });
+
+  if (res.status === 401) {
+    const fresh = await getIdToken(true);
+    if (!fresh) throw new Error("auth: no token after refresh");
+    token = fresh;
+    res = await fetch(`${CHAT_BASE_URL}/chat/stream`, {
+      ...fetchOpts,
+      headers: { ...fetchOpts.headers, Authorization: `Bearer ${token}` },
+    });
+  }
 
   if (!res.ok || !res.body) {
     throw new Error(`chat stream status ${res.status}`);

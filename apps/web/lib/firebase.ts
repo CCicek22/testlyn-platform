@@ -53,7 +53,7 @@ if (!DEV_BYPASS) {
  * `AuthProvider` is still hydrating) can briefly flash an empty page before
  * the user state settles.
  */
-export async function getIdToken(): Promise<string | null> {
+export async function getIdToken(forceRefresh = false): Promise<string | null> {
   if (DEV_BYPASS) {
     return "dev-bypass-token";
   }
@@ -61,7 +61,7 @@ export async function getIdToken(): Promise<string | null> {
   await auth.authStateReady();
   const user = auth.currentUser;
   if (!user) return null;
-  return user.getIdToken();
+  return user.getIdToken(forceRefresh);
 }
 
 // ─── Auth actions ──────────────────────────────────────────────────────────

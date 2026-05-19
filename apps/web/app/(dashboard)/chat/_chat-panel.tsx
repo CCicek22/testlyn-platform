@@ -97,12 +97,13 @@ export function ChatPanel() {
   const { user, loading } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [, setSessionId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
 
   // Auto-scroll to bottom on new messages / streaming tokens.
   useEffect(() => {
@@ -145,7 +146,7 @@ export function ChatPanel() {
       try {
         await streamChat({
           message: text,
-          sessionId,
+          sessionId: sessionIdRef.current,
           signal: controller.signal,
           onEvent: (event) => {
             if (event.kind === "error") {
@@ -153,7 +154,9 @@ export function ChatPanel() {
               return;
             }
             if (event.kind === "done") {
-              setSessionId(event.sessionId || sessionId);
+              const resolved = event.sessionId || sessionIdRef.current;
+              sessionIdRef.current = resolved;
+              setSessionId(resolved);
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId ? { ...m, streaming: false } : m
@@ -174,16 +177,16 @@ export function ChatPanel() {
         if ((err as { name?: string }).name === "AbortError") return;
         const msg = err instanceof Error ? err.message : "stream failed";
         setError(msg);
+      } finally {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, streaming: false } : m
           )
         );
-      } finally {
         setSending(false);
       }
     },
-    [sending, sessionId]
+    [sending]
   );
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
