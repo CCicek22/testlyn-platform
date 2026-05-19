@@ -11,7 +11,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_chat.tools._helpers import client_for, err, ok
+from testlyn_chat.tools._helpers import _validate_uuid, client_for, err, ok
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -24,6 +24,7 @@ async def list_load_tests(
     Args:
         project_id: UUID of the project.
     """
+    _validate_uuid(project_id, "project_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/projects/{project_id}/tests")
@@ -44,6 +45,7 @@ async def run_load_test(
     Args:
         test_id: UUID of the load test to run.
     """
+    _validate_uuid(test_id, "test_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.post(f"/v1/tests/{test_id}/runs", json={})
@@ -83,6 +85,7 @@ async def get_run_summary(
     Args:
         run_id: UUID of the run.
     """
+    _validate_uuid(run_id, "run_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/runs/{run_id}/summary")
@@ -100,6 +103,7 @@ async def cancel_run(
     Args:
         run_id: UUID of the run.
     """
+    _validate_uuid(run_id, "run_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.post(f"/v1/runs/{run_id}/cancel")

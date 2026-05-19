@@ -6,7 +6,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_chat.tools._helpers import client_for, err, ok
+from testlyn_chat.tools._helpers import _validate_uuid, client_for, err, ok
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -38,6 +38,7 @@ async def get_security_findings(
     Args:
         run_id: UUID of the security run.
     """
+    _validate_uuid(run_id, "run_id")
     # TODO: endpoint TBD.
     async with client_for(tool_context) as client:
         try:

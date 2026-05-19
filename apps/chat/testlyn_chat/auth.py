@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 import structlog
+from cachetools import LRUCache
 from fastapi import HTTPException, Request, status
 
 from testlyn_chat.config import get_settings
@@ -18,7 +19,7 @@ from testlyn_chat.config import get_settings
 log = structlog.get_logger(__name__)
 
 _CACHE_TTL = 60.0
-_cache: dict[str, tuple[dict[str, Any], float]] = {}
+_cache: LRUCache[str, tuple[dict[str, Any], float]] = LRUCache(maxsize=1000)
 _firebase_initialised = False
 
 
@@ -62,7 +63,7 @@ def verify_token(token: str) -> dict[str, Any] | None:
         _ensure_firebase_init()
         import firebase_admin.auth as fb_auth
 
-        decoded = fb_auth.verify_id_token(token)
+        decoded = fb_auth.verify_id_token(token, check_revoked=True)
     except Exception as exc:  # noqa: BLE001 — verify_id_token raises many subclasses
         log.debug("auth.verify_failed", error=str(exc))
         return None

@@ -39,6 +39,7 @@ from testlyn_chat.auth import get_current_user
 from testlyn_chat.config import get_settings
 from testlyn_chat.session.store import get_session_service
 from testlyn_chat.tools._helpers import SESSION_KEY_USER_TOKEN
+from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 structlog.configure(
     processors=[
@@ -96,7 +97,11 @@ def get_runner() -> Runner:
 # ---- Schemas ----------------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
-    session_id: str | None = None
+    session_id: str | None = Field(
+        default=None,
+        max_length=64,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+    )
 
 
 # ---- Endpoints --------------------------------------------------------------
@@ -159,6 +164,7 @@ async def chat_stream(
 
     async def event_stream() -> AsyncGenerator[dict[str, str], None]:
         last_author: str | None = None
+        errored = False
         try:
             async for event in runner.run_async(
                 user_id=user_id,
@@ -201,19 +207,35 @@ async def chat_stream(
                         "event": "token",
                         "data": json.dumps({"text": text}),
                     }
-        except Exception as exc:  # noqa: BLE001
-            log.exception("chat_stream.failed", error=str(exc))
+        except TestlynAPIError as exc:
+            errored = True
+            log.exception("chat_stream.upstream_failed", status=exc.status_code)
             yield {
                 "event": "error",
-                "data": json.dumps({"error": str(exc)}),
+                "data": json.dumps({"error": f"upstream error (status {exc.status_code})"}),
+            }
+        except PermissionError:
+            errored = True
+            log.exception("chat_stream.unauthenticated")
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": "authentication required"}),
+            }
+        except Exception:  # noqa: BLE001
+            errored = True
+            log.exception("chat_stream.failed")
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": "internal error"}),
             }
         finally:
-            yield {
-                "event": "done",
-                "data": json.dumps({"session_id": session_id}),
-            }
+            if not errored:
+                yield {
+                    "event": "done",
+                    "data": json.dumps({"session_id": session_id}),
+                }
 
-    return EventSourceResponse(event_stream())
+    return EventSourceResponse(event_stream(), ping=20)
 
 
 # ---- Event helpers ----------------------------------------------------------

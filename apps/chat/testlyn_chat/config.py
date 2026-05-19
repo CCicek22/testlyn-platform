@@ -43,10 +43,6 @@ class Settings(BaseSettings):
     # --- CORS / SSE ----------------------------------------------------------
     web_base_url: str = Field(default="http://localhost:3000")
 
-    # --- Service-to-service --------------------------------------------------
-    # Shared secret for any internal callers (e.g. cron pings, deploy probes).
-    internal_token: str | None = Field(default=None)
-
     # --- HTTP client ---------------------------------------------------------
     upstream_timeout_s: float = Field(default=30.0)
     upstream_connect_timeout_s: float = Field(default=5.0)

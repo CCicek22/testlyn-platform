@@ -12,7 +12,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_chat.tools._helpers import client_for, err, ok
+from testlyn_chat.tools._helpers import _validate_uuid, client_for, err, ok
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -25,6 +25,7 @@ async def list_functional_tests(
     Args:
         project_id: UUID of the project.
     """
+    _validate_uuid(project_id, "project_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/projects/{project_id}/tests")
@@ -44,6 +45,7 @@ async def run_functional_test(
     Args:
         test_id: UUID of the test.
     """
+    _validate_uuid(test_id, "test_id")
     # TODO: confirm body shape once /v1/products/functional/runs is finalised.
     async with client_for(tool_context) as client:
         try:

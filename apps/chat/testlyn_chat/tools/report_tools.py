@@ -6,7 +6,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_chat.tools._helpers import client_for, err, ok
+from testlyn_chat.tools._helpers import _validate_uuid, client_for, err, ok
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -41,6 +41,7 @@ async def get_run_detail(
     Args:
         run_id: UUID of the run.
     """
+    _validate_uuid(run_id, "run_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/runs/{run_id}")
@@ -58,6 +59,7 @@ async def get_insights_latest(
     Args:
         org_id: UUID of the organisation.
     """
+    _validate_uuid(org_id, "org_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/orgs/{org_id}/insights/latest")
@@ -75,6 +77,7 @@ async def get_report_url(
     Args:
         run_id: UUID of the run.
     """
+    _validate_uuid(run_id, "run_id")
     # TODO: endpoint TBD — placeholder until report-builder exposes a URL endpoint.
     async with client_for(tool_context) as client:
         try:

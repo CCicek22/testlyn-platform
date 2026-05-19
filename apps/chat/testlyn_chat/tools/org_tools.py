@@ -6,7 +6,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_chat.tools._helpers import client_for, err, ok
+from testlyn_chat.tools._helpers import _validate_uuid, client_for, err, ok
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -19,6 +19,7 @@ async def list_projects(
     Args:
         org_id: UUID of the organisation.
     """
+    _validate_uuid(org_id, "org_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/orgs/{org_id}/projects")
@@ -36,6 +37,7 @@ async def get_org(
     Args:
         org_id: UUID of the organisation.
     """
+    _validate_uuid(org_id, "org_id")
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/orgs/{org_id}")
@@ -53,6 +55,7 @@ async def list_org_members(
     Args:
         org_id: UUID of the organisation.
     """
+    _validate_uuid(org_id, "org_id")
     # TODO: confirm endpoint — likely /v1/orgs/{id}/members.
     async with client_for(tool_context) as client:
         try:
@@ -71,6 +74,7 @@ async def get_billing_summary(
     Args:
         org_id: UUID of the organisation.
     """
+    _validate_uuid(org_id, "org_id")
     # TODO: confirm endpoint when billing routes finalise.
     async with client_for(tool_context) as client:
         try:

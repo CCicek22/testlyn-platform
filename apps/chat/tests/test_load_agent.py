@@ -61,8 +61,9 @@ async def test_run_load_test_returns_ok_envelope(monkeypatch: pytest.MonkeyPatch
 
     _patched_client(monkeypatch, httpx.MockTransport(handler))
 
+    tid = "11111111-1111-4111-8111-111111111111"
     result = await load_tools.run_load_test(
-        test_id="11111111-1111-1111-1111-111111111111",
+        test_id=tid,
         tool_context=_ctx_with_token(),  # type: ignore[arg-type]
     )
 
@@ -71,7 +72,7 @@ async def test_run_load_test_returns_ok_envelope(monkeypatch: pytest.MonkeyPatch
         "data": {"id": "run-xyz", "status": "queued"},
     }
     assert called["method"] == "POST"
-    assert called["path"] == "/v1/tests/11111111-1111-1111-1111-111111111111/runs"
+    assert called["path"] == f"/v1/tests/{tid}/runs"
 
 
 @pytest.mark.asyncio
@@ -105,11 +106,20 @@ async def test_get_run_summary_surfaces_404_cleanly(monkeypatch: pytest.MonkeyPa
     _patched_client(monkeypatch, httpx.MockTransport(handler))
 
     result = await load_tools.get_run_summary(
-        run_id="nope",
+        run_id="11111111-1111-4111-8111-111111111111",
         tool_context=_ctx_with_token(),  # type: ignore[arg-type]
     )
 
     assert result == {"ok": False, "status": 404, "error": {"detail": "Run not found"}}
+
+
+@pytest.mark.asyncio
+async def test_get_run_summary_rejects_invalid_uuid() -> None:
+    with pytest.raises(ValueError, match="invalid run_id"):
+        await load_tools.get_run_summary(
+            run_id="nope",
+            tool_context=_ctx_with_token(),  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.asyncio

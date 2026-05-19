@@ -6,7 +6,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_chat.tools._helpers import client_for, err, ok
+from testlyn_chat.tools._helpers import _validate_schema_name, _validate_uuid, client_for, err, ok
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -43,6 +43,8 @@ async def generate_synthetic_dataset(
         schema_name: Name of an existing schema definition.
         row_count: Number of synthetic rows to produce.
     """
+    _validate_uuid(project_id, "project_id")
+    _validate_schema_name(schema_name)
     # TODO: confirm payload once endpoint contract is final.
     async with client_for(tool_context) as client:
         try:

@@ -66,6 +66,9 @@ async def test_chat_handler_refreshes_token_through_store(monkeypatch) -> None:
     We stub the LLM/runner side — the test only exercises the seeding /
     refresh code path in `chat_stream`, which is what the bug fix targets.
     """
+    import httpx
+    from httpx import ASGITransport
+
     from testlyn_chat import main as chat_main
     from testlyn_chat.session.store import get_session_service
 
@@ -79,8 +82,7 @@ async def test_chat_handler_refreshes_token_through_store(monkeypatch) -> None:
     def fake_verify(token: str):
         return {"uid": "user-1", "sub": "user-1"} if token else None
 
-    monkeypatch.setattr(chat_main, "verify_token", fake_verify, raising=False)
-    # The dependency reads via the top-level import in auth.py — patch there too.
+    # The dependency reads via the top-level import in auth.py — patch there.
     from testlyn_chat import auth as chat_auth
 
     monkeypatch.setattr(chat_auth, "verify_token", fake_verify)
@@ -95,38 +97,36 @@ async def test_chat_handler_refreshes_token_through_store(monkeypatch) -> None:
 
     monkeypatch.setattr(chat_main, "get_runner", lambda: _NoopRunner())
 
-    from fastapi.testclient import TestClient
+    # Use a valid session_id that matches the ChatRequest pattern.
+    sid = "sess-Aa1"
 
-    client = TestClient(chat_main.app)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=chat_main.app), base_url="http://test"
+    ) as client:
+        # Turn 1 — establish session with token "tok-A".
+        r1 = await client.post(
+            "/chat/stream",
+            json={"message": "hi", "session_id": sid},
+            headers={"Authorization": "Bearer tok-A"},
+        )
+        assert r1.status_code == 200
 
-    # Turn 1 — establish session with token "tok-A".
-    r1 = client.post(
-        "/chat/stream",
-        json={"message": "hi", "session_id": "sess-A"},
-        headers={"Authorization": "Bearer tok-A"},
-    )
-    assert r1.status_code == 200
-    # Consume the SSE body so the streaming response (and the request scope's
-    # finalisers) run to completion.
-    _ = r1.text
+        stored = await session_service.get_session(
+            app_name="testlyn-chat", user_id="user-1", session_id=sid
+        )
+        assert stored is not None
+        assert stored.state[SESSION_KEY_USER_TOKEN] == "tok-A"
 
-    stored = await session_service.get_session(
-        app_name="testlyn-chat", user_id="user-1", session_id="sess-A"
-    )
-    assert stored is not None
-    assert stored.state[SESSION_KEY_USER_TOKEN] == "tok-A"
-
-    # Turn 2 — same session, refreshed token. The store MUST now hold "tok-B".
-    r2 = client.post(
-        "/chat/stream",
-        json={"message": "still here", "session_id": "sess-A"},
-        headers={"Authorization": "Bearer tok-B"},
-    )
-    assert r2.status_code == 200
-    _ = r2.text
+        # Turn 2 — same session, refreshed token. The store MUST now hold "tok-B".
+        r2 = await client.post(
+            "/chat/stream",
+            json={"message": "still here", "session_id": sid},
+            headers={"Authorization": "Bearer tok-B"},
+        )
+        assert r2.status_code == 200
 
     refreshed = await session_service.get_session(
-        app_name="testlyn-chat", user_id="user-1", session_id="sess-A"
+        app_name="testlyn-chat", user_id="user-1", session_id=sid
     )
     assert refreshed is not None
     assert refreshed.state[SESSION_KEY_USER_TOKEN] == "tok-B", (
