@@ -44,6 +44,13 @@ export const STATIC_COMMANDS: CommandItem[] = [
     href: "/projects",
   },
   {
+    id: "nav-chat",
+    group: "navigate",
+    label: "Open Chat",
+    keywords: ["chat", "copilot", "assistant", "agent", "ai"],
+    href: "/chat",
+  },
+  {
     id: "nav-settings",
     group: "navigate",
     label: "Go to Settings",
