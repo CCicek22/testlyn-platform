@@ -45,3 +45,18 @@ output "runner_sa_email" {
   description = "Runner service account email"
   value       = module.iam.runner_sa_email
 }
+
+output "chat_url" {
+  description = "Cloud Run chat service URL (run.app — public custom domain is chat_domain)"
+  value       = module.cloud_run_chat.service_url
+}
+
+output "chat_sa_email" {
+  description = "Chat service account email"
+  value       = module.iam.chat_sa_email
+}
+
+output "chat_domain" {
+  description = "Custom domain mapped to testlyn-chat"
+  value       = var.chat_domain
+}

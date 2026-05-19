@@ -11,6 +11,7 @@ locals {
     "testlyn-runner" = "k6 worker Cloud Run Jobs service account"
     "testlyn-report" = "PDF and AI report builder service account"
     "testlyn-web"    = "Next.js Cloud Run service account"
+    "testlyn-chat"   = "ADK chat (Vertex AI) Cloud Run service account"
   }
 }
 
@@ -138,6 +139,48 @@ resource "google_project_iam_member" "web_secret_accessor" {
   project = var.project_id
   role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:${google_service_account.sa["testlyn-web"].email}"
+}
+
+# testlyn-chat bindings — Vertex AI (Gemini via google-genai), Secret Manager
+# (INTERNAL_TOKEN), and run.invoker so chat can call other Cloud Run services
+# (testlyn-api) over Direct VPC egress when ingress is internal.
+resource "google_project_iam_member" "chat_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
+}
+
+resource "google_project_iam_member" "chat_secret_accessor" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
+}
+
+resource "google_project_iam_member" "chat_run_invoker" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
+}
+
+resource "google_project_iam_member" "chat_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
+}
+
+resource "google_project_iam_member" "chat_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
+}
+
+# Required for firebase_admin.auth.verify_id_token() — the SDK needs to read
+# Identity Platform public keys + tenant config. Without this every chat
+# request 401s in prod.
+resource "google_project_iam_member" "chat_firebaseauth_viewer" {
+  project = var.project_id
+  role    = "roles/firebaseauth.viewer"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
 }
 
 # Workload Identity Federation binding for GitHub Actions CI

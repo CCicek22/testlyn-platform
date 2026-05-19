@@ -70,6 +70,41 @@ variable "engine_a11y_image" {
   default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine-a11y:latest"
 }
 
+variable "chat_image" {
+  description = "Container image for the chat (ADK 2 + FastAPI) Cloud Run service"
+  type        = string
+  default     = "us-central1-docker.pkg.dev/example-project/testlyn/chat:latest"
+}
+
+variable "chat_domain" {
+  description = "Custom domain mapped to the testlyn-chat Cloud Run service"
+  type        = string
+  default     = "chat.dev.testlyn.example.com"
+}
+
+variable "gemini_model" {
+  type        = string
+  default     = "gemini-3.1-flash-lite-preview"
+}
+
+variable "chat_redis_db" {
+  description = "Redis logical DB number for chat sessions (Dragonfly on db-vm). 0 = testlyn-api. 1 = chat."
+  type        = number
+  default     = 1
+}
+
+variable "web_base_url" {
+  description = "Public web base URL used by chat for CORS + redirects"
+  type        = string
+  default     = "https://dev.testlyn.example.com"
+}
+
+variable "api_base_url" {
+  description = "Public API base URL for chat to call testlyn-api"
+  type        = string
+  default     = "https://api.dev.testlyn.example.com"
+}
+
 variable "billing_account_id" {
   description = "GCP billing account ID (XXXXXX-XXXXXX-XXXXXX format)"
   type        = string

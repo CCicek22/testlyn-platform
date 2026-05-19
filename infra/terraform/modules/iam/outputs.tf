@@ -17,3 +17,8 @@ output "web_sa_email" {
   description = "testlyn-web service account email"
   value       = google_service_account.sa["testlyn-web"].email
 }
+
+output "chat_sa_email" {
+  description = "testlyn-chat service account email"
+  value       = google_service_account.sa["testlyn-chat"].email
+}

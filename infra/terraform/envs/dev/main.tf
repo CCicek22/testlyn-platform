@@ -196,6 +196,81 @@ module "cloud_run_web" {
   depends_on = [module.cloud_run_api, module.iam, module.network]
 }
 
+# ── Cloud Run: Chat service (ADK 2 + FastAPI on Vertex AI) ─────────────────
+# Uses Direct VPC egress (same shape as testlyn-api) so it can reach Dragonfly
+# on db-vm (10.0.0.5) for session/turn cache. Vertex AI calls go out the
+# default Google API egress path (NOT through VPC) — Workload Identity on the
+# testlyn-chat SA handles auth, no API keys.
+module "cloud_run_chat" {
+  source     = "../../modules/cloud_run"
+  project_id = var.gcp_project_id
+  region     = var.region
+  env        = var.env
+
+  service_name          = "testlyn-chat"
+  image                 = var.chat_image
+  service_account_email = module.iam.chat_sa_email
+  network_interfaces    = [{ network = "default", subnetwork = "default" }]
+  min_instances         = 0
+  max_instances         = 10
+  cpu                   = "1000m"
+  memory                = "512Mi"
+  port                  = 8080
+  health_check_path     = "/health"
+  allow_unauthenticated = true
+
+  env_vars = {
+    GCP_PROJECT         = var.gcp_project_id
+    REGION              = var.region
+    ENV                 = var.env
+    RUN_MODE            = "cloud"
+    TESTLYN_API_BASE    = var.api_base_url
+    VERTEX_PROJECT      = var.gcp_project_id
+    VERTEX_LOCATION     = var.region
+    GEMINI_MODEL        = var.gemini_model
+    FIREBASE_PROJECT_ID = var.gcp_project_id
+    REDIS_URL           = "redis://10.0.0.5:6379/${var.chat_redis_db}"
+    WEB_BASE_URL        = var.web_base_url
+  }
+
+  secret_env_vars = {
+    INTERNAL_TOKEN = {
+      secret  = module.secrets.chat_internal_token_secret_id
+      version = "latest"
+    }
+  }
+
+  depends_on = [module.iam, module.secrets, module.network]
+}
+
+# Domain mapping: chat.dev.testlyn.example.com → testlyn-chat
+# Uses google-beta because google_cloud_run_domain_mapping is the v1 Cloud Run
+# resource and the beta provider exposes the same fields with broader region
+# support. Managed cert provisioning takes 5–30 min after both this resource
+# and the Cloudflare CNAME (chat.dev → ghs.googlehosted.com) exist.
+resource "google_cloud_run_domain_mapping" "chat" {
+  provider = google-beta
+  project  = var.gcp_project_id
+  location = var.region
+  name     = var.chat_domain
+
+  metadata {
+    namespace = var.gcp_project_id
+    labels = {
+      app        = "testlyn"
+      phase      = "1"
+      env        = var.env
+      managed-by = "terraform"
+    }
+  }
+
+  spec {
+    route_name = module.cloud_run_chat.service_name
+  }
+
+  depends_on = [module.cloud_run_chat]
+}
+
 # ── Cloud Run Job: Engine ──────────────────────────────────────────────────
 module "cloud_run_job_engine" {
   source     = "../../modules/cloud_run_job"
