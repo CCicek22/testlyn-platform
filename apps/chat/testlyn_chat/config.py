@@ -28,7 +28,9 @@ class Settings(BaseSettings):
 
     # --- Vertex AI / Gemini --------------------------------------------------
     vertex_project: str = Field(default="example-project")
-    vertex_location: str = Field(default="us-central1")
+    # Gemini 3.x preview models are served only from the Vertex "global"
+    # endpoint (404 in regional locations); all other resources stay us-central1.
+    vertex_location: str = Field(default="global")
     gemini_model: str = Field(default="gemini-3.1-flash-lite-preview")
 
     # --- Auth -----------------------------------------------------------------
