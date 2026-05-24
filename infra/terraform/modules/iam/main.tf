@@ -174,15 +174,6 @@ resource "google_project_iam_member" "chat_metric_writer" {
   member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
 }
 
-# Required for firebase_admin.auth.verify_id_token() — the SDK needs to read
-# Identity Platform public keys + tenant config. Without this every chat
-# request 401s in prod.
-resource "google_project_iam_member" "chat_firebaseauth_viewer" {
-  project = var.project_id
-  role    = "roles/firebaseauth.viewer"
-  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
-}
-
 # Workload Identity Federation binding for GitHub Actions CI
 resource "google_project_iam_member" "github_wif_token_creator" {
   count   = var.github_wif_sa_email != "" ? 1 : 0

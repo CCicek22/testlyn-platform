@@ -63,7 +63,7 @@ def verify_token(token: str) -> dict[str, Any] | None:
         _ensure_firebase_init()
         import firebase_admin.auth as fb_auth
 
-        decoded = fb_auth.verify_id_token(token, check_revoked=True)
+        decoded = fb_auth.verify_id_token(token)
     except Exception as exc:  # noqa: BLE001 — verify_id_token raises many subclasses
         log.debug("auth.verify_failed", error=str(exc))
         return None
