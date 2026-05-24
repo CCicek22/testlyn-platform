@@ -21,8 +21,7 @@
 import { getIdToken } from "@/lib/firebase";
 
 const CHAT_BASE_URL =
-  process.env["NEXT_PUBLIC_CHAT_BASE_URL"] ??
-  "https://chat.dev.testlyn.example.com";
+  process.env["NEXT_PUBLIC_API_BASE_URL"] ?? "https://api.dev.testlyn.example.com";
 
 export interface TokenEvent {
   readonly kind: "token";

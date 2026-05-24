@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
+
 import structlog
 import structlog.stdlib
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from testlyn_api.config import get_settings
+from testlyn_api.chat.routes import router as chat_router
+from testlyn_api.config import Settings, get_settings
 from testlyn_api.core.firebase import init_firebase
 from testlyn_api.core.ip_allowlist import IPAllowlistMiddleware
 from testlyn_api.core.rate_limit import RateLimitMiddleware
@@ -42,6 +45,25 @@ from testlyn_api.routers import (
 )
 from testlyn_api.routers.graphql import graphql_router
 
+def configure_vertex_backend(settings: Settings) -> None:
+    """Point google-genai / ADK at the Vertex AI backend (global endpoint).
+
+    google-genai / ADK select the Vertex backend only when these three vars
+    are present. We use setdefault so an explicit external env always wins
+    (Cloud Run can override per-revision without a code change).
+
+    Uses the chat-specific GLOBAL location: Gemini 3.x preview models are
+    served only from the Vertex "global" endpoint. api's own Vertex calls pass
+    location explicitly to aiplatform.init(...), so this env var does not
+    affect them.
+
+    Must be called BEFORE any ADK agent or genai Client is constructed.
+    """
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.gcp_project_id)
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.chat_vertex_location)
+
+
 structlog.configure(
     processors=[
         structlog.stdlib.add_log_level,
@@ -66,6 +88,7 @@ app = FastAPI(
 
 settings = get_settings()
 init_firebase()
+configure_vertex_backend(settings)
 
 app.add_middleware(
     CORSMiddleware,
@@ -111,6 +134,7 @@ app.include_router(sso.router)
 app.include_router(scim.router)
 app.include_router(enterprise.router)
 app.include_router(graphql_router)
+app.include_router(chat_router)
 
 
 @app.get("/health", include_in_schema=False)

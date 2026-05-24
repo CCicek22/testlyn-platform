@@ -77,6 +77,21 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.1-flash-lite"
     vertex_ai_location: str = "us-central1"
 
+    # --- Chat (in-process ADK coordinator + sub-agents) ---
+    # Gemini 3.x preview models are served only from the Vertex "global"
+    # endpoint (404 in regional locations); api's own Vertex calls keep
+    # vertex_ai_location=us-central1 and pass location explicitly, so these
+    # never collide.
+    chat_gemini_model: str = "gemini-3.1-flash-lite-preview"
+    chat_vertex_location: str = "global"
+    chat_app_name: str = "testlyn-chat"
+    # Loopback to api's own port; chat tools call /v1/* with the user's bearer
+    # token so the API's auth/RBAC/audit/rate-limit still fire (Option A).
+    chat_api_base: str = "http://127.0.0.1:8080"
+    chat_upstream_timeout_s: float = 30.0
+    chat_upstream_connect_timeout_s: float = 5.0
+    chat_use_redis_session: bool = False
+
     # --- Stripe ---
     stripe_secret_key: str = "sk_test_PLACEHOLDER"
     stripe_webhook_secret: str = "whsec_PLACEHOLDER"

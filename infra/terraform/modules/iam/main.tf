@@ -66,6 +66,15 @@ resource "google_project_iam_member" "api_bq_job_user" {
   member  = "serviceAccount:${google_service_account.sa["testlyn-api"].email}"
 }
 
+# Vertex AI — the chat coordinator (folded into testlyn-api) calls Gemini via
+# google-genai/ADK under the api SA. Previously held by the now-removed
+# testlyn-chat SA.
+resource "google_project_iam_member" "api_aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.sa["testlyn-api"].email}"
+}
+
 # testlyn-runner bindings
 resource "google_project_iam_member" "runner_bq_data_editor" {
   project = var.project_id

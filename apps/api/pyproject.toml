@@ -26,6 +26,10 @@ dependencies = [
     "structlog>=25.3.0",
     "python-multipart>=0.0.26",
     "email-validator>=2.2.0",
+    "google-adk==2.0.0a1",
+    "google-genai>=1.0.0",
+    "sse-starlette>=2.1.0",
+    "cachetools>=5.5.0",
 ]
 
 [project.optional-dependencies]
