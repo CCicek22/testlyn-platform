@@ -21,6 +21,7 @@ SSE contract (frozen — coordinate with `frontend` teammate before changing):
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Any, AsyncGenerator
 
@@ -36,10 +37,25 @@ from sse_starlette.sse import EventSourceResponse
 
 from testlyn_chat.agents import build_coordinator_agent
 from testlyn_chat.auth import get_current_user
-from testlyn_chat.config import get_settings
+from testlyn_chat.config import Settings, get_settings
 from testlyn_chat.session.store import get_session_service
 from testlyn_chat.tools._helpers import SESSION_KEY_USER_TOKEN
 from testlyn_chat.tools.testlyn_client import TestlynAPIError
+
+
+def configure_vertex_backend(settings: Settings) -> None:
+    """Set the google-genai Vertex AI backend env vars from Settings.
+
+    google-genai / ADK select the Vertex backend only when these three vars
+    are present. We use setdefault so an explicit external env always wins
+    (Cloud Run can override per-revision without a code change).
+
+    Must be called BEFORE any ADK agent or genai Client is constructed.
+    """
+    os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.vertex_project)
+    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.vertex_location)
+
 
 structlog.configure(
     processors=[
@@ -67,6 +83,7 @@ app = FastAPI(
 )
 
 settings = get_settings()
+configure_vertex_backend(settings)
 
 app.add_middleware(
     CORSMiddleware,
