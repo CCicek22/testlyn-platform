@@ -33,6 +33,7 @@ from testlyn_api.routers import (
     internal,
     orgs,
     projects,
+    public,
     schedules,
     scim,
     sso,
@@ -113,6 +114,7 @@ app.include_router(stream.router)
 app.include_router(webhooks.router)
 app.include_router(schedules.router)
 app.include_router(internal.router)
+app.include_router(public.router)
 app.include_router(targets.router)
 app.include_router(functional_router)
 app.include_router(a11y_router)

@@ -5,21 +5,6 @@
 
 import type { Variants } from "framer-motion";
 
-/** Standard page entrance — fade + slide up. */
-export const pageVariants: Variants = {
-  hidden: { opacity: 0, y: 8 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.18, ease: [0.25, 0.46, 0.45, 0.94] },
-  },
-  exit: {
-    opacity: 0,
-    y: -4,
-    transition: { duration: 0.12, ease: "easeIn" },
-  },
-};
-
 /** Command palette overlay fade. */
 export const overlayVariants: Variants = {
   hidden: { opacity: 0 },

@@ -131,7 +131,11 @@ export function ProductTour({ product: _product = "load" }: ProductTourProps) {
           aria-modal="false"
           aria-label="Product tour"
           className={cn(
-            "fixed bottom-6 right-6 z-40 w-80 overflow-hidden rounded-xl",
+            // Sit above the chat composer at small widths so the card never
+            // overlays the page's interactive controls (send button etc.).
+            "fixed bottom-24 right-4 z-40 w-[calc(100%-2rem)] max-w-80",
+            "sm:bottom-6 sm:right-6 sm:w-80",
+            "overflow-hidden rounded-xl",
             "border border-zinc-700 bg-zinc-900 shadow-2xl"
           )}
           initial={reduced ? undefined : { opacity: 0, y: 16, scale: 0.97 }}

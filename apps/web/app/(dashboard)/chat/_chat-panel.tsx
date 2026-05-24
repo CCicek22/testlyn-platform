@@ -97,7 +97,6 @@ export function ChatPanel() {
   const { user, loading } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [, setSessionId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -151,12 +150,16 @@ export function ChatPanel() {
           onEvent: (event) => {
             if (event.kind === "error") {
               setError(event.error);
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, streaming: false } : m
+                )
+              );
               return;
             }
             if (event.kind === "done") {
               const resolved = event.sessionId || sessionIdRef.current;
               sessionIdRef.current = resolved;
-              setSessionId(resolved);
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId ? { ...m, streaming: false } : m
