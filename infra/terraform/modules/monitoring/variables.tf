@@ -41,3 +41,9 @@ variable "notification_channel_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_cost_alerts" {
+  description = "Create the billing budget + sidecar-spool alert policy. Disable in envs where the deploy identity lacks Billing-account perms or the custom metric does not exist yet."
+  type        = bool
+  default     = true
+}

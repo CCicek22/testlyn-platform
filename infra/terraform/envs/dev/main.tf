@@ -30,14 +30,10 @@ module "apis" {
 }
 
 # ── Network ─────────────────────────────────────────────────────────────────
-module "network" {
-  source     = "../../modules/network"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  depends_on = [module.apis]
-}
+# REMOVED 2026-05-24 — testlyn-vpc, subnet, connector, and private_ip_range
+# were deleted outside TF. Cloud Run services use Direct VPC egress on the
+# default VPC; no custom network or Serverless VPC Connector is needed.
+# CI owns Cloud Run service/job lifecycle — TF does not manage them.
 
 # ── IAM ─────────────────────────────────────────────────────────────────────
 module "iam" {
@@ -124,224 +120,21 @@ module "cloud_tasks" {
   depends_on = [module.apis]
 }
 
-# ── Cloud Run: API service ────────────────────────────────────────────────────
-module "cloud_run_api" {
-  source     = "../../modules/cloud_run"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  service_name          = "testlyn-api"
-  image                 = var.api_image
-  service_account_email = module.iam.api_sa_email
-  network_interfaces    = [{ network = "default", subnetwork = "default" }]
-  min_instances         = 0
-  max_instances         = 5
-  cpu                   = "1000m"
-  memory                = "512Mi"
-  port                  = 8080
-  health_check_path     = "/health"
-  allow_unauthenticated = true
-
-  env_vars = {
-    GCP_PROJECT    = var.gcp_project_id
-    REGION         = var.region
-    ENV            = var.env
-    DB_HOST        = var.db_host
-    DB_NAME        = "testlyn"
-    DB_USER        = "testlyn"
-    REDIS_URL      = var.redis_url
-    BQ_DATASET     = module.bigquery.dataset_id
-    TASKS_QUEUE    = module.cloud_tasks.queue_name
-    SCRIPTS_BUCKET = module.gcs.scripts_bucket
-    RESULTS_BUCKET = module.gcs.results_bucket
-    REPORTS_BUCKET = module.gcs.reports_bucket
-    LOGS_BUCKET    = module.gcs.logs_bucket
-  }
-
-  secret_env_vars = {
-    DB_PASSWORD = {
-      secret  = module.secrets.db_password_secret_id
-      version = "latest"
-    }
-  }
-
-  depends_on = [module.iam, module.network]
-}
-
-# ── Cloud Run: Web service ─────────────────────────────────────────────────
-module "cloud_run_web" {
-  source     = "../../modules/cloud_run"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  service_name          = "testlyn-web"
-  image                 = var.web_image
-  service_account_email = module.iam.web_sa_email
-  network_interfaces    = [{ network = "default", subnetwork = "default" }]
-  min_instances         = 0
-  max_instances         = 5
-  cpu                   = "1000m"
-  memory                = "512Mi"
-  port                  = 3000
-  health_check_path     = "/api/health"
-  allow_unauthenticated = true
-
-  env_vars = {
-    NEXT_PUBLIC_API_URL = module.cloud_run_api.service_url
-    ENV                 = var.env
-  }
-
-  depends_on = [module.cloud_run_api, module.iam, module.network]
-}
-
-# ── Cloud Run: Chat service (ADK 2 + FastAPI on Vertex AI) ─────────────────
-# Uses Direct VPC egress (same shape as testlyn-api) so it can reach Dragonfly
-# on db-vm (10.0.0.5) for session/turn cache. Vertex AI calls go out the
-# default Google API egress path (NOT through VPC) — Workload Identity on the
-# testlyn-chat SA handles auth, no API keys.
-module "cloud_run_chat" {
-  source     = "../../modules/cloud_run"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  service_name          = "testlyn-chat"
-  image                 = var.chat_image
-  service_account_email = module.iam.chat_sa_email
-  network_interfaces    = [{ network = "default", subnetwork = "default" }]
-  min_instances         = 0
-  max_instances         = 10
-  cpu                   = "1000m"
-  memory                = "512Mi"
-  port                  = 8080
-  health_check_path     = "/health"
-  allow_unauthenticated = true
-
-  env_vars = {
-    GCP_PROJECT         = var.gcp_project_id
-    REGION              = var.region
-    ENV                 = var.env
-    RUN_MODE            = "cloud"
-    TESTLYN_API_BASE    = var.api_base_url
-    VERTEX_PROJECT      = var.gcp_project_id
-    VERTEX_LOCATION     = var.region
-    GEMINI_MODEL        = var.gemini_model
-    FIREBASE_PROJECT_ID = var.gcp_project_id
-    REDIS_URL           = "redis://10.0.0.5:6379/${var.chat_redis_db}"
-    WEB_BASE_URL        = var.web_base_url
-  }
-
-  depends_on = [module.iam, module.network]
-}
-
-# Domain mapping: chat.dev.testlyn.example.com → testlyn-chat
-# Uses google-beta because google_cloud_run_domain_mapping is the v1 Cloud Run
-# resource and the beta provider exposes the same fields with broader region
-# support. Managed cert provisioning takes 5–30 min after both this resource
-# and the Cloudflare CNAME (chat.dev → ghs.googlehosted.com) exist.
-resource "google_cloud_run_domain_mapping" "chat" {
-  provider = google-beta
-  project  = var.gcp_project_id
-  location = var.region
-  name     = var.chat_domain
-
-  metadata {
-    namespace = var.gcp_project_id
-    labels = {
-      app        = "testlyn"
-      phase      = "1"
-      env        = var.env
-      managed-by = "terraform"
-    }
-  }
-
-  spec {
-    route_name = module.cloud_run_chat.service_name
-  }
-
-  depends_on = [module.cloud_run_chat]
-}
-
-# ── Cloud Run Job: Engine ──────────────────────────────────────────────────
-module "cloud_run_job_engine" {
-  source     = "../../modules/cloud_run_job"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  job_name              = "testlyn-engine"
-  image                 = var.engine_image
-  service_account_email = module.iam.runner_sa_email
-  vpc_connector_id      = module.network.connector_id
-  cpu                   = "4000m"
-  memory                = "16Gi"
-  timeout_seconds       = 3600
-  max_retries           = 0
-
-  env_vars = {
-    GCP_PROJECT    = var.gcp_project_id
-    REGION         = var.region
-    BQ_DATASET     = module.bigquery.dataset_id
-    SCRIPTS_BUCKET = module.gcs.scripts_bucket
-    RESULTS_BUCKET = module.gcs.results_bucket
-    SPOOL_BUCKET   = module.gcs.spool_bucket
-    CALLBACK_URL   = "${module.cloud_run_api.service_url}/v1/internal/runs"
-  }
-
-  depends_on = [module.bigquery, module.gcs, module.iam, module.network]
-}
-
-# ── Cloud Run Job: Engine Playwright (Phase 2) ────────────────────────────────
-# R6-C3: wire Phase 2 modules so they are tracked in state.
-# These jobs are feature-flagged at the API layer; Terraform still provisions them.
-module "cloud_run_job_playwright" {
-  source     = "../../modules/cloud_run_job_playwright"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  image                 = var.engine_playwright_image
-  service_account_email = module.iam.runner_sa_email
-  vpc_connector_id      = module.network.connector_id
-
-  env_vars = {
-    GCP_PROJECT    = var.gcp_project_id
-    REGION         = var.region
-    BQ_DATASET     = module.bigquery.dataset_id
-    SCRIPTS_BUCKET = module.gcs.scripts_bucket
-    RESULTS_BUCKET = module.gcs.results_bucket
-    SPOOL_BUCKET   = module.gcs.spool_bucket
-    CALLBACK_URL   = "${module.cloud_run_api.service_url}/v1/internal/runs"
-  }
-
-  depends_on = [module.bigquery, module.gcs, module.iam, module.network]
-}
-
-# ── Cloud Run Job: Engine a11y (Phase 2) ──────────────────────────────────────
-module "cloud_run_job_a11y" {
-  source     = "../../modules/cloud_run_job_a11y"
-  project_id = var.gcp_project_id
-  region     = var.region
-  env        = var.env
-
-  image                 = var.engine_a11y_image
-  service_account_email = module.iam.runner_sa_email
-  vpc_connector_id      = module.network.connector_id
-
-  env_vars = {
-    GCP_PROJECT    = var.gcp_project_id
-    REGION         = var.region
-    BQ_DATASET     = module.bigquery.dataset_id
-    SCRIPTS_BUCKET = module.gcs.scripts_bucket
-    RESULTS_BUCKET = module.gcs.results_bucket
-    SPOOL_BUCKET   = module.gcs.spool_bucket
-    CALLBACK_URL   = "${module.cloud_run_api.service_url}/v1/internal/runs"
-  }
-
-  depends_on = [module.bigquery, module.gcs, module.iam, module.network]
-}
+# ── Cloud Run services + jobs — REMOVED 2026-05-24 (Option B) ────────────────
+# CI (GitHub Actions / Cloud Build) owns the full Cloud Run service and job
+# lifecycle via `gcloud run deploy` / `gcloud run jobs update`. Terraform never
+# managed these resources in state; removing them from config eliminates the
+# planned-create drift without risking a destructive state import.
+#
+# Services removed: cloud_run_api, cloud_run_web, cloud_run_chat
+# Resource removed: google_cloud_run_domain_mapping.chat
+# Jobs removed:     cloud_run_job_engine, cloud_run_job_playwright, cloud_run_job_a11y
+#
+# NOTE: cloud_run_job_engine creation gap — ci-engine.yml only runs
+# `gcloud run jobs update` (with continue-on-error); it does NOT create the job.
+# The engine, playwright, and a11y jobs have no automated creation path now.
+# Operator must manually `gcloud run jobs create` once, or restore a TF module
+# with `lifecycle { ignore_changes = [template[0].containers[0].image] }`.
 
 # ── BigQuery a11y (Phase 2) ───────────────────────────────────────────────────
 module "bigquery_a11y" {
@@ -360,10 +153,10 @@ module "cloud_scheduler" {
   region     = var.region
   env        = var.env
 
-  api_base_url       = module.cloud_run_api.service_url
+  api_base_url       = var.api_base_url
   scheduler_sa_email = module.iam.api_sa_email
 
-  depends_on = [module.cloud_run_api]
+  depends_on = [module.iam]
 }
 
 # ── Monitoring ───────────────────────────────────────────────────────────────
@@ -378,6 +171,11 @@ module "monitoring" {
   budget_usd_threshold_1 = 50
   budget_usd_threshold_2 = 200
   budget_usd_threshold_3 = 500
+
+  # Disabled in dev: the deploy identity lacks Billing-account perms (budget)
+  # and the custom sidecar/spool_size_bytes metric doesn't exist until a load
+  # run emits it (alert). Re-enable once both prerequisites are met.
+  enable_cost_alerts = false
 
   depends_on = [module.apis]
 }

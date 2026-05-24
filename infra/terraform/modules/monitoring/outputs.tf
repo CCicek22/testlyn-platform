@@ -4,6 +4,6 @@ output "budget_alerts_topic" {
 }
 
 output "sidecar_spool_alert_policy_name" {
-  description = "Cloud Monitoring alert policy name for sidecar spool size"
-  value       = google_monitoring_alert_policy.sidecar_spool_size.name
+  description = "Cloud Monitoring alert policy name for sidecar spool size (null when cost alerts disabled)"
+  value       = one(google_monitoring_alert_policy.sidecar_spool_size[*].name)
 }

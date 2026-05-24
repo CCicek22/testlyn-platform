@@ -9,6 +9,7 @@ locals {
 
 # Budget alert for testlyn-labeled resources
 resource "google_billing_budget" "testlyn" {
+  count           = var.enable_cost_alerts ? 1 : 0
   billing_account = var.billing_account_id
   display_name    = "Testlyn Phase 1 Budget (${var.env})"
 
@@ -57,6 +58,7 @@ resource "google_pubsub_topic" "budget_alerts" {
 
 # Alert policy: sidecar spool size > 100 MB for 5 minutes
 resource "google_monitoring_alert_policy" "sidecar_spool_size" {
+  count        = var.enable_cost_alerts ? 1 : 0
   project      = var.project_id
   display_name = "Testlyn Sidecar Spool Size High"
   combiner     = "OR"

@@ -40,67 +40,8 @@ variable "redis_url" {
   default     = "redis://10.0.0.5:6379/0"
 }
 
-variable "api_image" {
-  description = "Container image for the API service"
-  type        = string
-  default     = "us-central1-docker.pkg.dev/example-project/testlyn/api:latest"
-}
-
-variable "web_image" {
-  description = "Container image for the web service"
-  type        = string
-  default     = "us-central1-docker.pkg.dev/example-project/testlyn/web:latest"
-}
-
-variable "engine_image" {
-  description = "Container image for the engine job"
-  type        = string
-  default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine:latest"
-}
-
-variable "engine_playwright_image" {
-  description = "Container image for the Playwright engine job (Phase 2)"
-  type        = string
-  default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine-playwright:latest"
-}
-
-variable "engine_a11y_image" {
-  description = "Container image for the a11y engine job (Phase 2)"
-  type        = string
-  default     = "us-central1-docker.pkg.dev/example-project/testlyn/engine-a11y:latest"
-}
-
-variable "chat_image" {
-  description = "Container image for the chat (ADK 2 + FastAPI) Cloud Run service"
-  type        = string
-  default     = "us-central1-docker.pkg.dev/example-project/testlyn/chat:latest"
-}
-
-variable "chat_domain" {
-  description = "Custom domain mapped to the testlyn-chat Cloud Run service"
-  type        = string
-  default     = "chat.dev.testlyn.example.com"
-}
-
-variable "gemini_model" {
-  type        = string
-  default     = "gemini-3.1-flash-lite-preview"
-}
-
-variable "chat_redis_db" {
-  description = "Redis logical DB number for chat sessions (Dragonfly on db-vm). 0 = testlyn-api. 1 = chat."
-  type        = number
-  default     = 1
-}
-
-variable "web_base_url" {
-  description = "Public web base URL used by chat for CORS + redirects"
-  type        = string
-  default     = "https://dev.testlyn.example.com"
-}
-
 variable "api_base_url" {
-  description = "Public API base URL for chat to call testlyn-api"
+  description = "Public API base URL — used by cloud_scheduler for HTTP target and OIDC audience"
   type        = string
   default     = "https://api.dev.testlyn.example.com"
 }
@@ -116,3 +57,8 @@ variable "github_wif_sa_email" {
   type        = string
   default     = ""
 }
+
+# REMOVED 2026-05-24 (Option B) — variables below were only referenced by
+# Cloud Run service/job modules now managed by CI, not Terraform:
+#   api_image, web_image, engine_image, engine_playwright_image, engine_a11y_image,
+#   chat_image, chat_domain, gemini_model, chat_redis_db, web_base_url

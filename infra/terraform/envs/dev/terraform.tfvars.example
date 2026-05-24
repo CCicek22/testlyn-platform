@@ -12,10 +12,8 @@ db_password = "CHANGE_ME"
 # db_host   = "10.0.0.5"
 # redis_url = "redis://10.0.0.5:6379/0"
 
-# Container images (filled in by CI after first build)
-api_image    = "us-central1-docker.pkg.dev/example-project/testlyn/api:latest"
-web_image    = "us-central1-docker.pkg.dev/example-project/testlyn/web:latest"
-engine_image = "us-central1-docker.pkg.dev/example-project/testlyn/engine:latest"
+# Public API base URL for Cloud Scheduler HTTP target + OIDC audience
+# api_base_url = "https://api.dev.testlyn.example.com"
 
 # Billing (for budget alerts — find in GCP Console > Billing)
 billing_account_id = "XXXXXX-XXXXXX-XXXXXX"
@@ -23,3 +21,6 @@ billing_account_id = "XXXXXX-XXXXXX-XXXXXX"
 # GitHub Actions Workload Identity Federation service account
 # Created separately; set to "" to skip WIF binding
 github_wif_sa_email = ""
+
+# NOTE: Container images (api_image, web_image, engine_image, etc.) are no longer
+# managed by Terraform. CI (GitHub Actions / Cloud Build) owns Cloud Run lifecycle.
