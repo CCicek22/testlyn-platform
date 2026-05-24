@@ -41,4 +41,4 @@ COPY --from=build /app/testlyn_chat ./testlyn_chat
 USER chat
 EXPOSE 8080
 
-CMD ["uvicorn", "testlyn_chat.main:app", "--host", "0.0.0.0", "--port", "8080", "--log-config", "/dev/null"]
+CMD ["uvicorn", "testlyn_chat.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]

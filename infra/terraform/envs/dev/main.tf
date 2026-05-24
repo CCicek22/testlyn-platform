@@ -233,14 +233,7 @@ module "cloud_run_chat" {
     WEB_BASE_URL        = var.web_base_url
   }
 
-  secret_env_vars = {
-    INTERNAL_TOKEN = {
-      secret  = module.secrets.chat_internal_token_secret_id
-      version = "latest"
-    }
-  }
-
-  depends_on = [module.iam, module.secrets, module.network]
+  depends_on = [module.iam, module.network]
 }
 
 # Domain mapping: chat.dev.testlyn.example.com → testlyn-chat
