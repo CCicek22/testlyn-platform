@@ -101,6 +101,18 @@ class K6Runner:
 
         from google.cloud import run_v2
 
+        # Cloud k6 downloads its script from GCS; the engine entrypoint
+        # hard-requires SCRIPT_GCS_URI. A test created with only an inline script
+        # has no script_uri yet, so persist it to the scripts bucket now.
+        script_gcs_uri = script_uri
+        if not script_gcs_uri:
+            inline = env.get("SCRIPT_INLINE", "")
+            if not inline:
+                raise ValueError(
+                    "load run has neither script_uri nor an inline script to upload"
+                )
+            script_gcs_uri = await self._upload_inline_script(test_run_id, inline)
+
         client = run_v2.JobsAsyncClient()
         job_name = f"projects/{settings.gcp_project_id}/locations/{settings.gcp_region}/jobs/testlyn-engine"
 
@@ -111,7 +123,7 @@ class K6Runner:
                         run_v2.EnvVar(name=k, value=v)
                         for k, v in {
                             "RUN_ID": str(test_run_id),
-                            "SCRIPT_GCS_URI": script_uri,
+                            "SCRIPT_GCS_URI": script_gcs_uri,
                             "VUS": str(vus),
                             "DURATION": f"{duration_seconds}s",
                             "BQ_DATASET": settings.gcp_bq_dataset,
@@ -142,6 +154,31 @@ class K6Runner:
             started_at=datetime.now(tz=UTC),
             region=settings.gcp_region,
         )
+
+    async def _upload_inline_script(
+        self, test_run_id: uuid.UUID, script: str
+    ) -> str:
+        """Persist an inline k6 script to the scripts bucket; return its gs:// URI.
+
+        The blocking GCS client runs in a worker thread so it doesn't stall the
+        event loop.
+        """
+        settings = get_settings()
+        bucket = settings.gcs_scripts_bucket
+        blob_name = f"inline/{test_run_id}.js"
+
+        def _upload() -> None:
+            from google.cloud import storage
+
+            client = storage.Client()
+            client.bucket(bucket).blob(blob_name).upload_from_string(
+                script, content_type="application/javascript"
+            )
+
+        await asyncio.to_thread(_upload)
+        uri = f"gs://{bucket}/{blob_name}"
+        log.info("k6_runner.uploaded_inline_script", run_id=str(test_run_id), uri=uri)
+        return uri
 
     async def _launch_docker(
         self,
