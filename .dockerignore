@@ -41,6 +41,12 @@ tmp
 # Repo content not needed at runtime
 infra/
 docs/
+
+# E2E tests / Playwright — never compiled into the prod build. They import
+# @playwright/test (an optional peer of next, not installed), which would fail
+# `next build`'s type-check. Kept in the repo for CI/local e2e, out of the image.
+apps/web/e2e/
+apps/web/playwright.config.ts
 # NOTE: pnpm-lock.yaml IS needed by apps/web/Dockerfile install layer
 # (`pnpm install --frozen-lockfile` reads it). Do NOT exclude.
 # Same for uv.lock (apps/api/Dockerfile uses `uv sync --frozen`).
