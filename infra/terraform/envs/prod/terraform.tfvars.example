@@ -7,7 +7,10 @@ region             = "us-central1"
 env                = "prod"
 
 # Postgres (live: self-hosted PgBouncer on db-vm VM 10.0.0.5)
-db_password = "CHANGE_ME"
+# NOTE: the live DB password is NOT set here. It lives in GCP Secret Manager
+# (secret `testlyn-db-password`) and is injected into testlyn-api by infra-repo.
+# Do NOT put a real password in this file or in terraform.tfvars.
+# `db_password` is a legacy/unused var (cloud_sql torn down) — leave it unset.
 # Optional overrides — defaults in variables.tf point at live infra.
 # db_host   = "10.0.0.5"
 # redis_url = "redis://10.0.0.5:6379/0"

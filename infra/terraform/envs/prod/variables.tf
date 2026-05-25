@@ -23,8 +23,15 @@ variable "env" {
 }
 
 variable "db_password" {
-  description = "Postgres user password (REQUIRED — sourced from TF_VAR_db_password / Secret Manager)."
+  # LEGACY/UNUSED: the only consumer was the cloud_sql module, torn down 2026-05-16
+  # (see main.tf). The live DB password is NOT set from this var — it is sourced
+  # from GCP Secret Manager (secret `testlyn-db-password`) and injected into
+  # testlyn-api by infra-repo (apps/testlyn cloudrun). Defaulted to "" so a real
+  # secret is never forced into a local terraform.tfvars. Override only via
+  # TF_VAR_db_password if the cloud_sql module is ever reinstated.
+  description = "Legacy/unused — live DB password lives in Secret Manager (testlyn-db-password), not here."
   type        = string
+  default     = ""
   sensitive   = true
 }
 
