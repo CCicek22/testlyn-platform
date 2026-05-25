@@ -130,8 +130,7 @@ class K6Runner:
         )
 
         response = await client.run_job(
-            name=job_name,
-            overrides=overrides,
+            request=run_v2.RunJobRequest(name=job_name, overrides=overrides),
         )
         # response is an Operation; execution name is in metadata
         op_meta = response.metadata
