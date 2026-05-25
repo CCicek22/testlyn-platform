@@ -4,9 +4,12 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { LogoPulse } from "@/components/brand/logo-pulse";
 import { useAuth } from "@/components/auth/auth-provider";
+import { api } from "@/lib/api-client";
 import { signOutUser } from "@/lib/firebase";
+import type { MeResponse } from "@testlyn/shared";
 import { cn } from "@/lib/utils";
 import { ProductSwitcher } from "@/components/nav/product-switcher";
 import { SidebarIconGrid } from "@/components/nav/sidebar-icon-grid";
@@ -196,6 +199,18 @@ export default function DashboardShell({
   const currentProduct = searchParams.get("product") ?? "load";
   const safeProduct = isProduct(currentProduct) ? currentProduct : "load";
 
+  // Membership lookup powers the org-guard below. Shares the ["me"] query key
+  // with the dashboard pages, so this adds no extra network round-trip.
+  const { data: me, isLoading: meLoading } = useQuery<MeResponse>({
+    queryKey: ["me"],
+    queryFn: () => api.me(),
+    enabled: user != null,
+    staleTime: 5 * 60_000,
+  });
+
+  const onOnboarding = pathname === "/onboarding";
+  const hasNoOrg = me != null && me.memberships.length === 0;
+
   // Client-side auth guard: redirect signed-out users before any data-fetching
   // child renders. Avoids the flash of dashboard chrome + a stream of 401s
   // while React Query mounts and hits the API anonymously.
@@ -205,8 +220,55 @@ export default function DashboardShell({
     }
   }, [loading, user, router]);
 
+  // Org guard: a brand-new user with zero memberships would otherwise dead-end
+  // on empty dashboard skeletons. Send them to onboarding; once they have an
+  // org, keep them out of onboarding.
+  useEffect(() => {
+    if (loading || !user || !me) return;
+    if (hasNoOrg && !onOnboarding) {
+      router.replace("/onboarding");
+    } else if (!hasNoOrg && onOnboarding) {
+      router.replace("/projects");
+    }
+  }, [loading, user, me, hasNoOrg, onOnboarding, router]);
+
   if (!loading && !user) {
     return null;
+  }
+
+  const loaderScreen = (
+    <div className="flex min-h-screen items-center justify-center bg-dark">
+      <LogoPulse size={28} wordmark={false} />
+    </div>
+  );
+
+  // Onboarding renders on a clean, sidebar-free canvas (the page owns its
+  // centered card layout). No dead nav links for a user without an org yet.
+  // Gate on membership resolution: while `me` is still loading — or for an
+  // org'd user who opened /onboarding directly — show the loader so the
+  // redirect guard fires without flashing the create-org UI. Only a confirmed
+  // zero-org user reaches the onboarding layout.
+  if (onOnboarding) {
+    if (meLoading || (me != null && me.memberships.length > 0)) {
+      return loaderScreen;
+    }
+    return (
+      <div className="flex min-h-screen flex-col bg-dark text-zinc-100">
+        <header className="flex h-14 items-center border-b border-zinc-800 px-4 sm:px-6">
+          <LogoPulse size={22} />
+        </header>
+        <main className="flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
+          {children}
+        </main>
+      </div>
+    );
+  }
+
+  // Hold the dashboard chrome until membership state is known (or while a
+  // redirect to onboarding is imminent) so no-org users never see the empty
+  // skeleton flash.
+  if (user && (meLoading || hasNoOrg)) {
+    return loaderScreen;
   }
 
   async function handleSignOut() {
