@@ -110,7 +110,10 @@ def _configure_logging(level: str) -> None:
     structlog.configure(
         processors=[
             structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
+            # NB: no add_logger_name — it reads logger.name, which the
+            # PrintLogger produced by PrintLoggerFactory does not have, so it
+            # raised AttributeError on the first log call and crashed the
+            # sidecar at startup.
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.JSONRenderer(),
         ],
