@@ -7,8 +7,8 @@ from typing import Any
 from google.adk.agents.context import Context as ToolContext
 
 from testlyn_api.chat.tools._helpers import (
-    _validate_schema_name,
-    _validate_uuid,
+    _schema_name_error,
+    _uuid_error,
     client_for,
     err,
     ok,
@@ -49,8 +49,10 @@ async def generate_synthetic_dataset(
         schema_name: Name of an existing schema definition.
         row_count: Number of synthetic rows to produce.
     """
-    _validate_uuid(project_id, "project_id")
-    _validate_schema_name(schema_name)
+    if (e := _uuid_error(project_id, "project_id")) is not None:
+        return e
+    if (e := _schema_name_error(schema_name)) is not None:
+        return e
     # TODO: confirm payload once endpoint contract is final.
     async with client_for(tool_context) as client:
         try:

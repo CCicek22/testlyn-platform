@@ -33,7 +33,11 @@ from sse_starlette.sse import EventSourceResponse
 
 from testlyn_api.chat.agents import build_coordinator_agent
 from testlyn_api.chat.session.store import get_session_service
-from testlyn_api.chat.tools._helpers import SESSION_KEY_USER_TOKEN
+from testlyn_api.chat.tools._helpers import (
+    SESSION_KEY_ORG_ID,
+    SESSION_KEY_PROJECT_ID,
+    SESSION_KEY_USER_TOKEN,
+)
 from testlyn_api.chat.tools.testlyn_client import TestlynAPIError
 from testlyn_api.config import get_settings
 from testlyn_api.deps import CurrentUserDep
@@ -69,6 +73,12 @@ class ChatRequest(BaseModel):
         max_length=64,
         pattern=r"^[a-zA-Z0-9_-]+$",
     )
+    # The project/org the user has selected in the UI. Seeded into ADK session
+    # state so tools can act on the active project without the user pasting a
+    # UUID (e.g. "run a load test on example.com"). Tools validate these, so we
+    # only length-bound here.
+    project_id: str | None = Field(default=None, max_length=64)
+    org_id: str | None = Field(default=None, max_length=64)
 
 
 # ---- Endpoints --------------------------------------------------------------
@@ -100,6 +110,14 @@ async def chat_stream(
     # subsequent turns would read stale tokens and every upstream call would
     # 401 within the hour. We must persist via `append_event` + state_delta,
     # which the service applies to its canonical copy.
+    # Seed/refresh per-turn state: the bearer token (rotates hourly) plus the
+    # UI's selected project/org so tools can act on the active project.
+    state_seed: dict[str, str] = {SESSION_KEY_USER_TOKEN: user_token}
+    if body.project_id:
+        state_seed[SESSION_KEY_PROJECT_ID] = body.project_id
+    if body.org_id:
+        state_seed[SESSION_KEY_ORG_ID] = body.org_id
+
     existing = await session_service.get_session(
         app_name=settings.chat_app_name, user_id=user_id, session_id=session_id
     )
@@ -108,16 +126,16 @@ async def chat_stream(
             app_name=settings.chat_app_name,
             user_id=user_id,
             session_id=session_id,
-            state={SESSION_KEY_USER_TOKEN: user_token},
+            state=state_seed,
         )
     else:
-        # Refresh the token each turn — IDs expire after 1 hour, the client
-        # rotates.
+        # Refresh each turn — IDs expire after 1 hour, the client rotates; and
+        # the user may have switched the active project mid-conversation.
         await session_service.append_event(
             session=existing,
             event=Event(
                 author="system",
-                actions=EventActions(state_delta={SESSION_KEY_USER_TOKEN: user_token}),
+                actions=EventActions(state_delta=state_seed),
             ),
         )
 

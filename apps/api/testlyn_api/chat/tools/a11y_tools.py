@@ -6,7 +6,7 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_api.chat.tools._helpers import _validate_uuid, client_for, err, ok
+from testlyn_api.chat.tools._helpers import _uuid_error, client_for, err, ok
 from testlyn_api.chat.tools.testlyn_client import TestlynAPIError
 
 
@@ -38,7 +38,8 @@ async def get_a11y_violations(
     Args:
         run_id: UUID of the a11y run.
     """
-    _validate_uuid(run_id, "run_id")
+    if (e := _uuid_error(run_id, "run_id")) is not None:
+        return e
     # TODO: endpoint TBD — likely /v1/products/a11y/runs/{id}/violations.
     async with client_for(tool_context) as client:
         try:

@@ -6,8 +6,25 @@ from typing import Any
 
 from google.adk.agents.context import Context as ToolContext
 
-from testlyn_api.chat.tools._helpers import _validate_uuid, client_for, err, ok
+from testlyn_api.chat.tools._helpers import _uuid_error, client_for, err, ok
 from testlyn_api.chat.tools.testlyn_client import TestlynAPIError
+
+
+async def list_orgs(
+    tool_context: ToolContext,
+) -> dict[str, Any]:
+    """List the organisations the current user belongs to (id + role).
+
+    Use this to discover an org_id before calling list_projects when the user
+    has not selected a project in the UI.
+    """
+    async with client_for(tool_context) as client:
+        try:
+            me = await client.get("/v1/me")
+        except TestlynAPIError as exc:
+            return err(exc)
+    memberships = me.get("memberships", []) if isinstance(me, dict) else []
+    return ok(memberships)
 
 
 async def list_projects(
@@ -19,7 +36,8 @@ async def list_projects(
     Args:
         org_id: UUID of the organisation.
     """
-    _validate_uuid(org_id, "org_id")
+    if (e := _uuid_error(org_id, "org_id")) is not None:
+        return e
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/orgs/{org_id}/projects")
@@ -37,7 +55,8 @@ async def get_org(
     Args:
         org_id: UUID of the organisation.
     """
-    _validate_uuid(org_id, "org_id")
+    if (e := _uuid_error(org_id, "org_id")) is not None:
+        return e
     async with client_for(tool_context) as client:
         try:
             data = await client.get(f"/v1/orgs/{org_id}")
@@ -55,7 +74,8 @@ async def list_org_members(
     Args:
         org_id: UUID of the organisation.
     """
-    _validate_uuid(org_id, "org_id")
+    if (e := _uuid_error(org_id, "org_id")) is not None:
+        return e
     # TODO: confirm endpoint — likely /v1/orgs/{id}/members.
     async with client_for(tool_context) as client:
         try:
@@ -74,7 +94,8 @@ async def get_billing_summary(
     Args:
         org_id: UUID of the organisation.
     """
-    _validate_uuid(org_id, "org_id")
+    if (e := _uuid_error(org_id, "org_id")) is not None:
+        return e
     # TODO: confirm endpoint when billing routes finalise.
     async with client_for(tool_context) as client:
         try:

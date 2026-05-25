@@ -19,7 +19,10 @@ from httpx import AsyncClient
 
 from testlyn_api.chat import routes as chat_routes
 from testlyn_api.chat.session.store import get_session_service
-from testlyn_api.chat.tools._helpers import SESSION_KEY_USER_TOKEN
+from testlyn_api.chat.tools._helpers import (
+    SESSION_KEY_PROJECT_ID,
+    SESSION_KEY_USER_TOKEN,
+)
 
 # dev_auth_bypass resolves the deterministic dev user; user_id in the route is
 # firebase_uid or str(id). Bypass leaves firebase_uid None, so user_id is the
@@ -156,6 +159,31 @@ async def test_chat_stream_seeds_and_refreshes_token(
         "Token refresh did not write through to the session store — "
         "the deepcopy-discard bug is back."
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_seeds_active_project(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The UI's selected project_id is seeded into session state so tools can
+    act on the active project without the user pasting a UUID."""
+    monkeypatch.setattr(chat_routes, "get_runner", lambda: _StubRunner(["ok"]))
+    session_service = get_session_service()
+    sid = "sess-Cc3"
+    proj = "22e6855a-7768-4a81-9baf-090303783781"
+
+    r = await client.post(
+        "/chat/stream",
+        json={"message": "run a load test", "session_id": sid, "project_id": proj},
+        headers={"Authorization": "Bearer tok-A"},
+    )
+    assert r.status_code == 200
+
+    stored = await session_service.get_session(
+        app_name="testlyn-chat", user_id=_DEV_USER_ID, session_id=sid
+    )
+    assert stored is not None
+    assert stored.state[SESSION_KEY_PROJECT_ID] == proj
 
 
 @pytest.mark.asyncio
