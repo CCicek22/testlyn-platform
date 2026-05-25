@@ -11,7 +11,6 @@ locals {
     "testlyn-runner" = "k6 worker Cloud Run Jobs service account"
     "testlyn-report" = "PDF and AI report builder service account"
     "testlyn-web"    = "Next.js Cloud Run service account"
-    "testlyn-chat"   = "ADK chat (Vertex AI) Cloud Run service account"
   }
 }
 
@@ -150,38 +149,16 @@ resource "google_project_iam_member" "web_secret_accessor" {
   member  = "serviceAccount:${google_service_account.sa["testlyn-web"].email}"
 }
 
-# testlyn-chat bindings — Vertex AI (Gemini via google-genai), Secret Manager
-# (INTERNAL_TOKEN), and run.invoker so chat can call other Cloud Run services
-# (testlyn-api) over Direct VPC egress when ingress is internal.
-resource "google_project_iam_member" "chat_aiplatform_user" {
-  project = var.project_id
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
-}
-
-resource "google_project_iam_member" "chat_secret_accessor" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
-}
-
-resource "google_project_iam_member" "chat_run_invoker" {
-  project = var.project_id
-  role    = "roles/run.invoker"
-  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
-}
-
-resource "google_project_iam_member" "chat_log_writer" {
-  project = var.project_id
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
-}
-
-resource "google_project_iam_member" "chat_metric_writer" {
-  project = var.project_id
-  role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.sa["testlyn-chat"].email}"
-}
+# testlyn-chat SA + bindings removed — standalone chat Cloud Run service torn
+# down (folded into testlyn-api in-process, PR #29). This state owns the SA AND
+# the 5 chat_* bindings, so this apply is the DESTROYER: removing the for_each
+# entry drops the SA, and the bindings are removed in the same apply (dependency-
+# correct, bindings destroyed before/with the SA they reference). The infra-repo
+# apps/testlyn config also declared this SA in its state — after this apply
+# destroys the live SA, that side must `terraform state rm
+# google_service_account.testlyn_chat` (no live SA left to destroy there).
+# NOTE: chat_secret_accessor granted access TO testlyn-internal-token-dev (shared
+# run-lifecycle secret) — only the chat SA's BINDING is removed, the secret stays.
 
 # Workload Identity Federation binding for GitHub Actions CI
 resource "google_project_iam_member" "github_wif_token_creator" {

@@ -32,8 +32,3 @@ output "runner_sa_email" {
   description = "Runner service account email"
   value       = module.iam.runner_sa_email
 }
-
-output "chat_sa_email" {
-  description = "Chat service account email"
-  value       = module.iam.chat_sa_email
-}
