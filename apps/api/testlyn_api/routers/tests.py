@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from testlyn_api.core.permissions import _enforce_perm
@@ -22,10 +22,18 @@ async def list_tests(
     project_id: uuid.UUID,
     current_user: CurrentUserDep,
     session: SessionDep,
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ) -> list[TestOut]:
     project = await _get_project_or_404(project_id, session)
     await _enforce_perm("read", "test", user_id=current_user.id, org_id=project.org_id, project_id=project_id, session=session)
-    result = await session.execute(select(Test).where(Test.project_id == project_id))
+    result = await session.execute(
+        select(Test)
+        .where(Test.project_id == project_id)
+        .order_by(Test.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     return [TestOut.model_validate(t) for t in result.scalars().all()]
 
 

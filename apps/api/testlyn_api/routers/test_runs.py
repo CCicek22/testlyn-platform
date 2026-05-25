@@ -96,17 +96,32 @@ async def list_runs(
     session: SessionDep,
     product: str | None = None,
 ) -> list[RunOut]:
-    """List runs triggered by the current user across all orgs they belong to."""
+    """List runs triggered by the current user in orgs they currently belong to.
+
+    Membership is rechecked via run → test → project → org → OrgMember so a user
+    removed from an org no longer sees runs they triggered while a member.
+    """
     from sqlalchemy import and_
+
+    from testlyn_api.models.org import OrgMember
 
     clauses = [TestRun.triggered_by == current_user.id]
     if product is not None:
         clauses.append(TestRun.product == product)
     result = await session.execute(
         select(TestRun)
+        .join(Test, TestRun.test_id == Test.id)
+        .join(Project, Test.project_id == Project.id)
+        .join(
+            OrgMember,
+            and_(
+                OrgMember.org_id == Project.org_id,
+                OrgMember.user_id == current_user.id,
+            ),
+        )
         .options(joinedload(TestRun.test))
         .where(and_(*clauses))
-        .order_by(TestRun.id.desc())
+        .order_by(TestRun.created_at.desc())
         .limit(200)
     )
     return [RunOut.from_run_and_test(r, r.test) for r in result.unique().scalars().all()]

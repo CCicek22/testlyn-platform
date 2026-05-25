@@ -170,6 +170,57 @@ async def test_record_usage_round_trips(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_advisory_lock_key_is_stable_across_calls() -> None:
+    """Advisory lock SQL must be deterministic (not per-process hash())."""
+    from sqlalchemy import select
+
+    captured: list[str] = []
+
+    class _FakeDialect:
+        name = "postgresql"
+
+    class _FakeBind:
+        dialect = _FakeDialect()
+
+    class _FakeSession:
+        bind = _FakeBind()
+
+        async def execute(self, stmt):
+            text_clause = getattr(stmt, "text", None)
+            if text_clause is not None and "pg_advisory_xact_lock" in text_clause:
+                # Compile with literal binds so a regression to a random Python
+                # hash() value (interpolated into the SQL) would surface here.
+                captured.append(str(stmt.compile(compile_kwargs={"literal_binds": True})))
+
+            class _Result:
+                def scalar_one_or_none(self_inner):
+                    return UsageRecord(org_id=org_id, month="2026-01", runs_count=0, vu_seconds_total=0)
+
+            return _Result()
+
+        def add(self, _obj):  # pragma: no cover - not exercised when record exists
+            pass
+
+        async def flush(self):  # pragma: no cover
+            pass
+
+    org_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    svc = QuotaService(_FakeSession())  # type: ignore[arg-type]
+
+    # Avoid the unused-import lint while keeping select available for parity.
+    _ = select
+
+    await svc._get_or_create_usage(org_id, "2026-01")
+    await svc._get_or_create_usage(org_id, "2026-01")
+
+    assert len(captured) == 2
+    assert captured[0] == captured[1]
+    # Deterministic + parameterized: the literal org_id string, not a hash int.
+    assert "hashtextextended" in captured[0]
+    assert str(org_id) in captured[0]
+
+
+@pytest.mark.asyncio
 async def test_record_usage_increments(db_session: AsyncSession) -> None:
     """Calling record_usage twice yields runs_count == 2."""
     from datetime import UTC, datetime

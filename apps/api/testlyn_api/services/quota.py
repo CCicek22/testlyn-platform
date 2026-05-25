@@ -45,14 +45,21 @@ class QuotaService:
 
     async def _get_or_create_usage(self, org_id: object, month: str) -> UsageRecord:
         # Advisory lock prevents TOCTOU race when two runs start simultaneously
-        # for the same org. Lock key derived from org_id hash — fits bigint range.
+        # for the same org. The lock key MUST be stable across processes —
+        # Python's hash() is per-process randomized (PYTHONHASHSEED), so it would
+        # not serialize across Cloud Run instances. Use Postgres-native
+        # hashtextextended() (deterministic) computed inside the DB; the org_id
+        # is passed as a bind parameter, never interpolated into SQL.
         # Raw SQL here is an explicit exception to §6 (no raw SQL in app code);
         # pg_advisory_xact_lock has no SQLAlchemy ORM equivalent.
         # Skipped on non-Postgres backends (e.g. SQLite in tests).
         dialect = self._session.bind.dialect.name if self._session.bind else ""  # type: ignore[union-attr]
         if dialect == "postgresql":
-            lock_key = hash(str(org_id)) & 0x7FFFFFFFFFFFFFFF
-            await self._session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))").bindparams(
+                    k=str(org_id)
+                )
+            )
 
         result = await self._session.execute(
             select(UsageRecord).where(

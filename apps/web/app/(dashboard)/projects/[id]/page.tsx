@@ -25,7 +25,7 @@ function TestRow({ test }: { test: Test }) {
             Edit
           </Button>
         </Link>
-        <Link href={`/tests/${test.id}/runs`}>
+        <Link href={`/tests/${test.id}`}>
           <Button variant="outline" size="sm" className="border-zinc-700 text-zinc-300 hover:text-zinc-100">
             Runs
           </Button>

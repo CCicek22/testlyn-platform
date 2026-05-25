@@ -287,3 +287,241 @@ async def test_create_project_nonexistent_org_returns_404(client: AsyncClient) -
         json={"name": "Ghost Project", "slug": "ghost-project"},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# list_runs ordering (fix: order by created_at, not random uuid id)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_runs_orders_most_recent_first(client: AsyncClient, monkeypatch) -> None:
+    """GET /v1/runs returns runs newest-first by created_at, not by random uuid."""
+    from datetime import UTC, datetime, timedelta
+
+    from testlyn_api.core import tasks
+    from testlyn_api.models.test_run import TestRun
+
+    async def _noop(_run_id):
+        pass
+
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
+
+    org_id = (await client.post("/v1/orgs", json={"name": "OrderOrg"})).json()["id"]
+    proj_id = (
+        await client.post(
+            f"/v1/orgs/{org_id}/projects", json={"name": "OrderProj", "slug": "order-proj"}
+        )
+    ).json()["id"]
+    test_id = (
+        await client.post(
+            f"/v1/projects/{proj_id}/tests",
+            json={
+                "name": "Order test",
+                "script_inline": "export default function() {}",
+                "config": {"vus": 1, "duration_seconds": 5},
+            },
+        )
+    ).json()["id"]
+
+    # Create three runs and stamp distinct created_at values out of insertion order.
+    run_ids = []
+    for _ in range(3):
+        rid = (await client.post(f"/v1/tests/{test_id}/runs", json={})).json()["id"]
+        run_ids.append(uuid.UUID(rid))
+
+    # Force created_at ordering: run_ids[1] newest, then run_ids[0], then run_ids[2].
+    from sqlalchemy import select as _select
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    stamps = {run_ids[1]: base + timedelta(hours=3), run_ids[0]: base + timedelta(hours=2), run_ids[2]: base + timedelta(hours=1)}
+    # Use a fresh app-bound session via the override is not trivial here, so reach
+    # into the same session the client uses through a direct query patch.
+    from tests.conftest import TestSessionLocal
+
+    async with TestSessionLocal() as s:
+        for rid, ts in stamps.items():
+            run = (await s.execute(_select(TestRun).where(TestRun.id == rid))).scalar_one()
+            run.created_at = ts
+        await s.commit()
+
+    resp = await client.get("/v1/runs?product=load")
+    assert resp.status_code == 200
+    returned = [uuid.UUID(r["id"]) for r in resp.json()]
+    # Newest first: run_ids[1], run_ids[0], run_ids[2]
+    assert returned[:3] == [run_ids[1], run_ids[0], run_ids[2]]
+
+
+# ---------------------------------------------------------------------------
+# TestCreate / TestConfig input validation (fix: reject <=0 vus/duration,
+# cap name + script length)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_test_zero_vus_returns_422(client: AsyncClient) -> None:
+    org_id = (await client.post("/v1/orgs", json={"name": "VuOrg"})).json()["id"]
+    proj_id = (
+        await client.post(f"/v1/orgs/{org_id}/projects", json={"name": "VuProj", "slug": "vu-proj"})
+    ).json()["id"]
+    resp = await client.post(
+        f"/v1/projects/{proj_id}/tests",
+        json={
+            "name": "Bad vus",
+            "script_inline": "export default function() {}",
+            "config": {"vus": 0, "duration_seconds": 5},
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_test_negative_duration_returns_422(client: AsyncClient) -> None:
+    org_id = (await client.post("/v1/orgs", json={"name": "DurOrg"})).json()["id"]
+    proj_id = (
+        await client.post(
+            f"/v1/orgs/{org_id}/projects", json={"name": "DurProj", "slug": "dur-proj"}
+        )
+    ).json()["id"]
+    resp = await client.post(
+        f"/v1/projects/{proj_id}/tests",
+        json={
+            "name": "Bad duration",
+            "script_inline": "export default function() {}",
+            "config": {"vus": 1, "duration_seconds": -5},
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_test_overlong_name_returns_422(client: AsyncClient) -> None:
+    org_id = (await client.post("/v1/orgs", json={"name": "NameOrg"})).json()["id"]
+    proj_id = (
+        await client.post(
+            f"/v1/orgs/{org_id}/projects", json={"name": "NameProj", "slug": "name-proj"}
+        )
+    ).json()["id"]
+    resp = await client.post(
+        f"/v1/projects/{proj_id}/tests",
+        json={
+            "name": "x" * 201,
+            "script_inline": "export default function() {}",
+            "config": {"vus": 1, "duration_seconds": 5},
+        },
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# list_tests pagination (fix: bounded limit/offset)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_tests_respects_limit(client: AsyncClient) -> None:
+    org_id = (await client.post("/v1/orgs", json={"name": "PageOrg"})).json()["id"]
+    proj_id = (
+        await client.post(
+            f"/v1/orgs/{org_id}/projects", json={"name": "PageProj", "slug": "page-proj"}
+        )
+    ).json()["id"]
+    for i in range(3):
+        await client.post(
+            f"/v1/projects/{proj_id}/tests",
+            json={
+                "name": f"T{i}",
+                "script_inline": "export default function() {}",
+                "config": {"vus": 1, "duration_seconds": 5},
+            },
+        )
+
+    resp = await client.get(f"/v1/projects/{proj_id}/tests?limit=2")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+    # Cap enforced: limit above 200 is rejected.
+    resp_over = await client.get(f"/v1/projects/{proj_id}/tests?limit=500")
+    assert resp_over.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_tests_offset_pages(client: AsyncClient) -> None:
+    org_id = (await client.post("/v1/orgs", json={"name": "OffOrg"})).json()["id"]
+    proj_id = (
+        await client.post(f"/v1/orgs/{org_id}/projects", json={"name": "OffProj", "slug": "off-proj"})
+    ).json()["id"]
+    for i in range(3):
+        await client.post(
+            f"/v1/projects/{proj_id}/tests",
+            json={
+                "name": f"O{i}",
+                "script_inline": "export default function() {}",
+                "config": {"vus": 1, "duration_seconds": 5},
+            },
+        )
+
+    page1 = await client.get(f"/v1/projects/{proj_id}/tests?limit=2&offset=0")
+    page2 = await client.get(f"/v1/projects/{proj_id}/tests?limit=2&offset=2")
+    assert len(page1.json()) == 2
+    assert len(page2.json()) == 1
+    ids1 = {t["id"] for t in page1.json()}
+    ids2 = {t["id"] for t in page2.json()}
+    assert ids1.isdisjoint(ids2)
+
+
+# ---------------------------------------------------------------------------
+# list_runs current-membership recheck (fix: user removed from org no longer
+# sees runs they triggered there)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_runs_hidden_after_org_removal(client: AsyncClient, monkeypatch) -> None:
+    from sqlalchemy import delete, select as _select
+
+    from testlyn_api.core import tasks
+    from testlyn_api.models.org import OrgMember
+
+    async def _noop(_run_id):
+        pass
+
+    monkeypatch.setattr(tasks, "enqueue_run", _noop)
+
+    org_id = (await client.post("/v1/orgs", json={"name": "RemoveOrg"})).json()["id"]
+    proj_id = (
+        await client.post(
+            f"/v1/orgs/{org_id}/projects", json={"name": "RemoveProj", "slug": "remove-proj"}
+        )
+    ).json()["id"]
+    test_id = (
+        await client.post(
+            f"/v1/projects/{proj_id}/tests",
+            json={
+                "name": "Remove test",
+                "script_inline": "export default function() {}",
+                "config": {"vus": 1, "duration_seconds": 5},
+            },
+        )
+    ).json()["id"]
+    run_id = (await client.post(f"/v1/tests/{test_id}/runs", json={})).json()["id"]
+
+    # While a member, the run is visible.
+    visible = await client.get("/v1/runs?product=load")
+    assert run_id in {r["id"] for r in visible.json()}
+
+    # Remove the current user's membership in that org.
+    from tests.conftest import TestSessionLocal
+
+    async with TestSessionLocal() as s:
+        member = (
+            await s.execute(
+                _select(OrgMember).where(OrgMember.org_id == uuid.UUID(org_id))
+            )
+        ).scalar_one()
+        await s.execute(delete(OrgMember).where(OrgMember.id == member.id))
+        await s.commit()
+
+    # Now the run must no longer appear.
+    after = await client.get("/v1/runs?product=load")
+    assert run_id not in {r["id"] for r in after.json()}

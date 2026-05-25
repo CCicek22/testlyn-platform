@@ -4,19 +4,23 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# Matches Test.name -> String(255) and Test.script_inline -> Text (unbounded).
+_NAME_MAX_LENGTH = 200
+_SCRIPT_MAX_LENGTH = 1_000_000
 
 
 class TestConfig(BaseModel):
-    vus: int = 1
-    duration_seconds: int = 30
+    vus: int = Field(1, gt=0)
+    duration_seconds: int = Field(30, gt=0)
     thresholds: dict[str, list[str]] = {}
 
 
 class TestCreate(BaseModel):
-    name: str
+    name: str = Field(..., max_length=_NAME_MAX_LENGTH)
     product: str = "load"
-    script_inline: str | None = None
+    script_inline: str | None = Field(default=None, max_length=_SCRIPT_MAX_LENGTH)
     config: TestConfig = TestConfig()
 
 

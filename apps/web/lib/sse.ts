@@ -161,7 +161,10 @@ export function useSSE<T>(
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
-          // SSE events are delimited by a blank line.
+          // SSE events are delimited by a blank line. Normalize CRLF→LF so the
+          // LF split also handles sse-starlette's CRLF frames (defensive: this
+          // endpoint emits LF today but may move to sse-starlette).
+          buffer = buffer.replace(/\r\n/g, "\n");
           let sep: number;
           while ((sep = buffer.indexOf("\n\n")) !== -1) {
             const chunk = buffer.slice(0, sep);

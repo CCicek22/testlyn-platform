@@ -43,10 +43,11 @@ async def _ensure_bootstrap_org_membership(
         )
         session.add(org)
         try:
-            await session.flush()
+            async with session.begin_nested():  # SAVEPOINT
+                await session.flush()
         except IntegrityError:
-            # Concurrent caller created the org first — reload and continue.
-            await session.rollback()
+            # Concurrent caller created the org first — the savepoint rolled back
+            # only this insert (not the whole transaction); reload and continue.
             result = await session.execute(
                 select(Organization).where(Organization.slug == settings.bootstrap_org_slug)
             )

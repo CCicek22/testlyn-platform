@@ -49,6 +49,57 @@ class TestSecurityRunnerProtocol:
         assert result.region == "local"
 
     @pytest.mark.asyncio
+    async def test_launch_subprocess_uses_nonpredictable_temp_path(self) -> None:
+        """Report path must NOT be the predictable /tmp/zap-<id>.json (bandit B108)."""
+        from unittest.mock import AsyncMock, patch
+
+        from testlyn_api.products.security import runner as runner_mod
+        from testlyn_api.products.security.runner import SecurityRunner
+
+        runner = SecurityRunner()
+        run_id = uuid.uuid4()
+
+        fake_proc = AsyncMock()
+        fake_proc.communicate.return_value = (b"", b"")
+        fake_proc.returncode = 0
+
+        with (
+            patch("shutil.which", return_value="/usr/local/bin/zap-baseline.py"),
+            patch(
+                "asyncio.create_subprocess_exec", AsyncMock(return_value=fake_proc)
+            ) as mock_exec,
+            patch.object(runner_mod.log, "info") as mock_info,
+            patch("httpx.AsyncClient"),
+        ):
+            result = await runner.launch(
+                test_run_id=run_id,
+                script_uri="",
+                vus=1,
+                duration_seconds=60,
+                env={"TARGET_URL": "https://example.com", "SCAN_KIND": "baseline"},
+            )
+            # Let the fire-and-forget background callback run to completion so
+            # the captured subprocess invocation is the real one the runner built.
+            for task in list(runner_mod._background_tasks):
+                await task
+
+        # Recover the cmd from the subprocess_launch log (report path follows -J).
+        captured_cmd: list[str] = []
+        for call in mock_info.call_args_list:
+            if call.args and call.args[0] == "security_runner.subprocess_launch":
+                captured_cmd = call.kwargs["cmd"]
+                break
+
+        assert captured_cmd, "expected subprocess_launch log with cmd"
+        report_path = captured_cmd[captured_cmd.index("-J") + 1]
+        assert report_path != f"/tmp/zap-{run_id}.json"
+        assert report_path.endswith(".json")
+        assert f"zap-{run_id}" in report_path
+        # The same path was passed to the subprocess.
+        assert report_path in mock_exec.call_args.args
+        assert result.region == "local"
+
+    @pytest.mark.asyncio
     async def test_cancel_docker_noop(self) -> None:
         from testlyn_api.products.security.runner import SecurityRunner
 

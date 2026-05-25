@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+import tempfile
 import uuid
 from datetime import UTC, datetime
 
@@ -102,7 +103,12 @@ class SecurityRunner:
 
         target_url = env.get("TARGET_URL", "")
         scan_kind = env.get("SCAN_KIND", "baseline")
-        report_path = f"/tmp/zap-{test_run_id}.json"
+        # Avoid a predictable temp path (bandit B108): a non-guessable file the
+        # process owns, kept after close so the ZAP subprocess can write to it.
+        with tempfile.NamedTemporaryFile(
+            prefix=f"zap-{test_run_id}-", suffix=".json", delete=False
+        ) as report_file:
+            report_path = report_file.name
 
         cmd = [
             "python3",
@@ -143,6 +149,15 @@ class SecurityRunner:
                     )
             except Exception as exc:
                 log.error("security_runner.subprocess_error", run_id=str(test_run_id), error=str(exc))
+            finally:
+                # Clean up the report temp file (delete=False keeps it for the
+                # subprocess; remove once the run + callback are done).
+                import os
+
+                try:
+                    os.unlink(report_path)
+                except OSError:
+                    pass
 
         _task = asyncio.create_task(_run_and_callback())
         _background_tasks.add(_task)
