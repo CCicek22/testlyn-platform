@@ -113,6 +113,15 @@ class K6Runner:
                 )
             script_gcs_uri = await self._upload_inline_script(test_run_id, inline)
 
+        # Tell the engine exactly where to write the k6 summary JSON. Without
+        # this the entrypoint falls back to a hard-coded prod bucket default, so
+        # derive it from the configured results bucket (matching the entrypoint's
+        # gs://<bucket>/<org>/<run>/summary.json layout).
+        org_id = env.get("ORG_ID", "")
+        summary_gcs_uri = (
+            f"gs://{settings.gcs_results_bucket}/{org_id}/{test_run_id}/summary.json"
+        )
+
         client = run_v2.JobsAsyncClient()
         job_name = f"projects/{settings.gcp_project_id}/locations/{settings.gcp_region}/jobs/testlyn-engine"
 
@@ -124,6 +133,7 @@ class K6Runner:
                         for k, v in {
                             "RUN_ID": str(test_run_id),
                             "SCRIPT_GCS_URI": script_gcs_uri,
+                            "SUMMARY_GCS_URI": summary_gcs_uri,
                             "VUS": str(vus),
                             "DURATION": f"{duration_seconds}s",
                             "BQ_DATASET": settings.gcp_bq_dataset,

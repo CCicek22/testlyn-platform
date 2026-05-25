@@ -49,6 +49,7 @@ def _fake_settings() -> SimpleNamespace:
         gcp_region="us-central1",
         gcp_bq_dataset="testlyn_metrics",
         gcs_scripts_bucket="testlyn-prod-scripts",
+        gcs_results_bucket="testlyn-prod-results",
         api_base_url="http://testserver",
         internal_token="secret-tok",
     )
@@ -79,7 +80,11 @@ async def test_launch_cloud_passes_overrides_inside_request(
     assert req.name.endswith("/jobs/testlyn-engine")
     assert req.overrides.container_overrides, "overrides must carry container env"
     # Pre-uploaded script_uri is passed through unchanged.
-    assert _override_env(req)["SCRIPT_GCS_URI"] == "gs://bucket/script.js"
+    oenv = _override_env(req)
+    assert oenv["SCRIPT_GCS_URI"] == "gs://bucket/script.js"
+    # Engine summary target is derived from the results bucket + org + run.
+    assert oenv["SUMMARY_GCS_URI"].startswith("gs://testlyn-prod-results/org-123/")
+    assert oenv["SUMMARY_GCS_URI"].endswith("/summary.json")
     assert result.region == "us-central1"
     assert result.runner_id  # execution name propagated
 
