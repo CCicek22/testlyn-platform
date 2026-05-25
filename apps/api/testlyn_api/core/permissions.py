@@ -3,7 +3,7 @@
 Permission matrix
 -----------------
 Actions  : read | write | delete | run | manage_members | manage_billing
-Resources: org | project | target | test | test_run | report | audit_log
+Resources: org | project | target | test | test_run | report | audit_log | webhook
 
 Role hierarchy (ascending privilege):
   viewer < member < admin < owner
@@ -70,6 +70,13 @@ PERMISSION_MATRIX: dict[tuple[str, str], str] = {
     ("read", "audit_log"): "admin",
     ("write", "audit_log"): "owner",  # sinks CRUD
     ("delete", "audit_log"): "owner",
+    # ── webhook ───────────────────────────────────────────────────────────────
+    # Reads: any member. Mutations (create/update/replay = "write", delete) are
+    # admin-only — webhook destination control is sensitive even with the
+    # delivery-time SSRF guard.
+    ("read", "webhook"): "viewer",
+    ("write", "webhook"): "admin",
+    ("delete", "webhook"): "admin",
 }
 
 

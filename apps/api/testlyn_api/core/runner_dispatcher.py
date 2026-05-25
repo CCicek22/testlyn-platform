@@ -142,15 +142,20 @@ class RunnerDispatcher:
             payload["image_uri"] = image_uri
         payload.update(extra)
 
+        # Internal endpoints are gated by a shared secret (X-Internal-Token),
+        # not OIDC — match core/tasks._enqueue_cloud_tasks so the dispatched
+        # task's POST to /v1/internal/runs/{id}/start passes the gate.
+        if not settings.internal_token:
+            log.warning("dispatcher.internal_token_unset", run_id=str(test_run_id))
+
         task = tasks_v2.Task(
             http_request=tasks_v2.HttpRequest(
                 http_method=tasks_v2.HttpMethod.POST,
                 url=url,
-                oidc_token=tasks_v2.OidcToken(
-                    service_account_email=f"testlyn-api@{project_id}.iam.gserviceaccount.com",
-                    audience=url,
-                ),
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Internal-Token": settings.internal_token,
+                },
                 body=json.dumps(payload).encode(),
             )
         )

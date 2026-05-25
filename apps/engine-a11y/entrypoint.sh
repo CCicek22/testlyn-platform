@@ -28,6 +28,9 @@ MAX_DEPTH="${MAX_DEPTH:-1}"
 WCAG_TAGS="${WCAG_TAGS:-wcag2a,wcag2aa,wcag21aa,wcag22aa}"
 ORG_ID="${ORG_ID:-unknown}"
 REGION="${REGION:-us-central1}"
+# Shared secret for the /v1/internal/* gate (injected via the Cloud Run Job
+# container override). Optional so docker/dev runs without it still work.
+INTERNAL_TOKEN="${INTERNAL_TOKEN:-}"
 
 export RUN_ID AUDIT_URLS MAX_DEPTH WCAG_TAGS
 
@@ -51,8 +54,11 @@ set -e
 EXIT_CODE="${NODE_EXIT}"
 
 # Notify API of completion regardless of exit code.
+# Internal endpoints are gated by a shared secret (X-Internal-Token); send it
+# so the callback is accepted in cloud mode (mirrors the load engine).
 curl -sf -X POST "${CALLBACK_URL}" \
   -H "Content-Type: application/json" \
+  ${INTERNAL_TOKEN:+-H "X-Internal-Token: ${INTERNAL_TOKEN}"} \
   -d "{\"exit_code\": ${EXIT_CODE}}" || true
 
 exit "${EXIT_CODE}"

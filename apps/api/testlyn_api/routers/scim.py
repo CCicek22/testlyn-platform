@@ -9,9 +9,12 @@ PUT    /v2/scim/{org_id}/Users/{user_id}    — replace user
 DELETE /v2/scim/{org_id}/Users/{user_id}    — delete user (removes membership)
 GET    /v2/scim/{org_id}/Groups             — list groups (scaffold: empty)
 
-Auth: Bearer token in Authorization header.  The token must match the org's
-configured SCIM token (stored in Secret Manager; lookup deferred to Phase 4 GA).
-For now, any non-empty Bearer token is accepted in DEV_AUTH_BYPASS mode.
+Auth: Bearer token in Authorization header.  The presented token is compared
+in constant time against the org's configured SCIM secret (SCIM_TOKENS_RAW,
+sourced from Secret Manager).  Verification is bound to the {org_id} in the
+path, so org A's token cannot act on org B.  Fails closed: an org with no
+configured token rejects every request.  DEV_AUTH_BYPASS skips the check for
+local/test runs only (forbidden when run_mode='cloud').
 
 Note: These endpoints are intentionally on /v2/ (not /v1/) to match the
 SCIM 2.0 spec URL convention and stay independent of the API rate-limiter
@@ -20,6 +23,8 @@ which only covers /v1/ routes.
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import uuid
 
 import structlog
@@ -51,11 +56,15 @@ def _assert_scim_enabled() -> None:
         )
 
 
-def _verify_bearer(authorization: str | None) -> None:
-    """Verify SCIM bearer token.
+def _verify_bearer(authorization: str | None, org_id: uuid.UUID) -> None:
+    """Verify the SCIM bearer token against the org's configured SCIM secret.
 
-    Phase 4 GA: look up the token against the org's stored SCIM secret.
-    For scaffold: reject empty/missing tokens; accept any non-empty token in bypass mode.
+    The presented token is compared in constant time (``secrets.compare_digest``
+    over SHA-256 digests, so token length is not leaked) against the per-org
+    secret configured in SCIM_TOKENS_RAW.  Verification is bound to ``org_id``,
+    so a token issued for one org cannot operate on another.  Fails closed: an
+    org with no configured token rejects every request.  DEV_AUTH_BYPASS skips
+    the check for local/test runs only (never reachable in cloud mode).
     """
     settings = get_settings()
     if settings.dev_auth_bypass:
@@ -72,8 +81,19 @@ def _verify_bearer(authorization: str | None) -> None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Empty SCIM bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    # TODO (Phase 4 GA): verify token matches org's SCIM secret from Secret Manager
+
+    expected = settings.scim_tokens.get(str(org_id).lower())
+    if not expected or not secrets.compare_digest(
+        hashlib.sha256(token.encode()).digest(),
+        hashlib.sha256(expected.encode()).digest(),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid SCIM bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def _base_url(request: Request) -> str:
@@ -96,7 +116,7 @@ async def list_scim_users(
     filter: str | None = Query(default=None),
 ) -> JSONResponse:
     _assert_scim_enabled()
-    _verify_bearer(authorization)
+    _verify_bearer(authorization, org_id)
     data = await scim_svc.scim_list_users(
         session,
         org_id,
@@ -116,7 +136,7 @@ async def create_scim_user(
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     _assert_scim_enabled()
-    _verify_bearer(authorization)
+    _verify_bearer(authorization, org_id)
     payload = await request.json()
     data = await scim_svc.scim_create_user(session, org_id, payload, _base_url(request))
     return _scim_response(data, status_code=status.HTTP_201_CREATED)
@@ -131,7 +151,7 @@ async def get_scim_user(
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     _assert_scim_enabled()
-    _verify_bearer(authorization)
+    _verify_bearer(authorization, org_id)
     data = await scim_svc.scim_get_user(session, org_id, user_id, _base_url(request))
     if data is None:
         return _scim_response(
@@ -149,7 +169,7 @@ async def replace_scim_user(
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     _assert_scim_enabled()
-    _verify_bearer(authorization)
+    _verify_bearer(authorization, org_id)
     payload = await request.json()
     data = await scim_svc.scim_replace_user(
         session, org_id, user_id, payload, _base_url(request)
@@ -169,7 +189,7 @@ async def delete_scim_user(
     authorization: str | None = Header(default=None),
 ) -> None:
     _assert_scim_enabled()
-    _verify_bearer(authorization)
+    _verify_bearer(authorization, org_id)
     deleted = await scim_svc.scim_delete_user(session, org_id, user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="User not found")
@@ -189,6 +209,6 @@ async def list_scim_groups(
     count: int = Query(default=100, ge=1, le=1000),
 ) -> JSONResponse:
     _assert_scim_enabled()
-    _verify_bearer(authorization)
+    _verify_bearer(authorization, org_id)
     data = await scim_svc.scim_list_groups(org_id, _base_url(request), start_index, count)
     return _scim_response(data)

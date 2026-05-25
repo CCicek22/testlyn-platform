@@ -10,10 +10,12 @@ from __future__ import annotations
 import uuid
 
 import strawberry
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.core.auth import CurrentUser
+from testlyn_api.core.permissions import _enforce_perm
 
 # ---------------------------------------------------------------------------
 # GraphQL types
@@ -91,11 +93,20 @@ class Query:
         from testlyn_api.models.org import Organization
 
         session: AsyncSession = info.context["session"]
+        user: CurrentUser = info.context["user"]
         result = await session.execute(
             select(Organization).where(Organization.id == uuid.UUID(str(id)))
         )
         row = result.scalar_one_or_none()
         if row is None:
+            return None
+        # Tenant isolation: caller must be able to read this org. Return null
+        # (not an error) on failure so we don't leak org existence.
+        try:
+            await _enforce_perm(
+                "read", "org", user_id=user.id, org_id=row.id, session=session
+            )
+        except HTTPException:
             return None
         return GQLOrg(
             id=strawberry.ID(str(row.id)),
@@ -107,11 +118,32 @@ class Query:
     async def tests(
         self, info: strawberry.types.Info, project_id: strawberry.ID
     ) -> list[GQLTest]:
+        from testlyn_api.models.project import Project
         from testlyn_api.models.test import Test
 
         session: AsyncSession = info.context["session"]
+        user: CurrentUser = info.context["user"]
+        pid = uuid.UUID(str(project_id))
+        proj_result = await session.execute(
+            select(Project).where(Project.id == pid)
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return []
+        # Tenant isolation: mirror REST list_tests (read:test). Empty on denial.
+        try:
+            await _enforce_perm(
+                "read",
+                "test",
+                user_id=user.id,
+                org_id=project.org_id,
+                project_id=project.id,
+                session=session,
+            )
+        except HTTPException:
+            return []
         result = await session.execute(
-            select(Test).where(Test.project_id == uuid.UUID(str(project_id)))
+            select(Test).where(Test.project_id == pid)
         )
         rows = result.scalars().all()
         return [
@@ -131,12 +163,38 @@ class Query:
         test_id: strawberry.ID,
         limit: int = 20,
     ) -> list[GQLRun]:
+        from testlyn_api.models.project import Project
+        from testlyn_api.models.test import Test
         from testlyn_api.models.test_run import TestRun
 
         session: AsyncSession = info.context["session"]
+        user: CurrentUser = info.context["user"]
+        tid = uuid.UUID(str(test_id))
+        # Traverse run → test → project → org to enforce RBAC (mirrors REST).
+        test_result = await session.execute(select(Test).where(Test.id == tid))
+        test = test_result.scalar_one_or_none()
+        if test is None:
+            return []
+        proj_result = await session.execute(
+            select(Project).where(Project.id == test.project_id)
+        )
+        project = proj_result.scalar_one_or_none()
+        if project is None:
+            return []
+        try:
+            await _enforce_perm(
+                "read",
+                "test_run",
+                user_id=user.id,
+                org_id=project.org_id,
+                project_id=project.id,
+                session=session,
+            )
+        except HTTPException:
+            return []
         result = await session.execute(
             select(TestRun)
-            .where(TestRun.test_id == uuid.UUID(str(test_id)))
+            .where(TestRun.test_id == tid)
             .order_by(TestRun.created_at.desc())
             .limit(limit)
         )
@@ -145,7 +203,7 @@ class Query:
             GQLRun(
                 id=strawberry.ID(str(r.id)),
                 test_id=strawberry.ID(str(r.test_id)),
-                status=r.status,
+                status=r.state,
                 product=r.product,
             )
             for r in rows

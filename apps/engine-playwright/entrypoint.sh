@@ -26,6 +26,9 @@ SUMMARY_GCS_URI="${SUMMARY_GCS_URI:-gs://testlyn-prod-results/${ORG_ID}/${RUN_ID
 SPOOL_GCS_BUCKET="${SPOOL_GCS_BUCKET:-testlyn-prod-spool}"
 PW_OUTPUT_PATH="${PW_OUTPUT_PATH:-/tmp/pw.jsonl}"
 WORK_DIR="${WORK_DIR:-/tmp/work}"
+# Shared secret for the /v1/internal/* gate (injected via the Cloud Run Job
+# container override). Optional so docker/dev runs without it still work.
+INTERNAL_TOKEN="${INTERNAL_TOKEN:-}"
 
 mkdir -p "${WORK_DIR}"
 
@@ -94,11 +97,12 @@ _gcs_upload_dir() {
 
 _post_callback() {
     local status="${1}"
-    local token
-    token="$(_oidc_token)" 2>/dev/null || token=""
+    # Internal endpoints are gated by a shared secret (X-Internal-Token), not
+    # OIDC. The previous metadata-server Authorization bearer was rejected by
+    # the API's X-Internal-Token gate; _oidc_token is still used for GCS I/O.
     curl -fsS -X POST "${CALLBACK_URL}" \
         -H "Content-Type: application/json" \
-        ${token:+-H "Authorization: Bearer ${token}"} \
+        ${INTERNAL_TOKEN:+-H "X-Internal-Token: ${INTERNAL_TOKEN}"} \
         -d "{\"run_id\":\"${RUN_ID}\",\"status\":\"${status}\",\"exit_code\":${PW_EXIT}}" \
         --max-time 10 || true
 }

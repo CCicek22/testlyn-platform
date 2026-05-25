@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
 from testlyn_api.core.permissions import _enforce_perm
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.products.api_contract.runner import ApiContractRunner
 from testlyn_api.products.api_contract.schemas import (
@@ -48,6 +49,25 @@ async def scan(
         org_id=body.org_id,
         session=session,
     )
+
+    # SSRF guard: both the spec URL and the API-under-test URL are fetched by
+    # Schemathesis inside the worker, so reject private/loopback/link-local/
+    # reserved/metadata targets before enqueueing the job.
+    for url in (body.openapi_url, body.target_url):
+        try:
+            assert_safe_url(str(url))
+        except UnsafeURL as exc:
+            log.warning(
+                "api_contract.scan.unsafe_url",
+                url=str(url),
+                reason=str(exc),
+                org_id=str(body.org_id),
+                user_id=str(current_user.id),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="target URL is not allowed",
+            ) from exc
 
     scan_id = uuid.uuid4()
 

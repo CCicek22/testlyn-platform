@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 
 import structlog
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
 from testlyn_api.core.permissions import _enforce_perm
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.products.security.runner import SecurityRunner
 from testlyn_api.products.security.schemas import SecurityScanResponse, ZapScanRequest
@@ -44,6 +45,24 @@ async def scan(
         org_id=body.org_id,
         session=session,
     )
+
+    # SSRF guard: ZAP fetches target_url from inside the worker network, so
+    # reject private/loopback/link-local/reserved/metadata targets before
+    # enqueueing the scan.
+    try:
+        assert_safe_url(str(body.target_url))
+    except UnsafeURL as exc:
+        log.warning(
+            "security.scan.unsafe_url",
+            url=str(body.target_url),
+            reason=str(exc),
+            org_id=str(body.org_id),
+            user_id=str(current_user.id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="target URL is not allowed",
+        ) from exc
 
     scan_id = uuid.uuid4()
 

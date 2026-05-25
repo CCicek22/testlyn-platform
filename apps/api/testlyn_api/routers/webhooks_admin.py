@@ -18,6 +18,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.org import OrgMember
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
@@ -98,7 +100,10 @@ async def create_endpoint(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> EndpointOut:
-    await _assert_org_member(org_id, current_user.id, session)
+    await _enforce_perm(
+        "write", "webhook", user_id=current_user.id, org_id=org_id, session=session
+    )
+    _validate_url(str(body.url))
     _validate_events(body.events)
 
     ep = WebhookEndpoint(
@@ -149,9 +154,12 @@ async def patch_endpoint(
     session: SessionDep,
 ) -> EndpointOut:
     ep = await _get_endpoint_or_404(endpoint_id, session)
-    await _assert_org_member(ep.org_id, current_user.id, session)
+    await _enforce_perm(
+        "write", "webhook", user_id=current_user.id, org_id=ep.org_id, session=session
+    )
 
     if body.url is not None:
+        _validate_url(str(body.url))
         ep.url = str(body.url)
     if body.events is not None:
         _validate_events(body.events)
@@ -172,7 +180,9 @@ async def delete_endpoint(
     session: SessionDep,
 ) -> None:
     ep = await _get_endpoint_or_404(endpoint_id, session)
-    await _assert_org_member(ep.org_id, current_user.id, session)
+    await _enforce_perm(
+        "delete", "webhook", user_id=current_user.id, org_id=ep.org_id, session=session
+    )
     await session.delete(ep)
     await session.commit()
     log.info("webhook.endpoint.deleted", endpoint_id=str(endpoint_id))
@@ -235,7 +245,9 @@ async def replay_delivery(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delivery not found")
 
     ep = await _get_endpoint_or_404(delivery.endpoint_id, session)
-    await _assert_org_member(ep.org_id, current_user.id, session)
+    await _enforce_perm(
+        "write", "webhook", user_id=current_user.id, org_id=ep.org_id, session=session
+    )
 
     delivery.status = "pending"
     delivery.attempts = 0
@@ -276,3 +288,19 @@ def _validate_events(events: list[str]) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unknown event types: {sorted(unknown)}. Valid: {sorted(EVENTS)}",
         )
+
+
+def _validate_url(url: str) -> None:
+    """Reject SSRF-unsafe destination URLs at create/update time.
+
+    Reuses the centralized SSRF guard (core.url_safety.assert_safe_url, the same
+    one webhook delivery uses) so invalid/internal endpoints are rejected early
+    rather than silently failing on first delivery.
+    """
+    try:
+        assert_safe_url(url)
+    except UnsafeURL as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unsafe webhook URL: {exc}",
+        ) from exc

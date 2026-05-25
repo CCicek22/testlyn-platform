@@ -74,6 +74,25 @@ class Settings(BaseSettings):
 
     # --- SCIM ---
     scim_enabled: bool = False
+    # Per-org SCIM bearer tokens, sourced from Secret Manager. Format:
+    # "<org_uuid>=<token>,<org_uuid>=<token>" (comma-separated pairs). Empty =>
+    # SCIM fails closed (rejects every request) even when scim_enabled is True.
+    scim_tokens_raw: str = ""
+
+    @property
+    def scim_tokens(self) -> dict[str, str]:
+        """Parse SCIM_TOKENS_RAW into a {org_id_lower: token} mapping."""
+        out: dict[str, str] = {}
+        for pair in self.scim_tokens_raw.split(","):
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            org_id, _, token = pair.partition("=")
+            org_id = org_id.strip().lower()
+            token = token.strip()
+            if org_id and token:
+                out[org_id] = token
+        return out
 
     # --- Web ---
     web_base_url: str = "http://localhost:3000"

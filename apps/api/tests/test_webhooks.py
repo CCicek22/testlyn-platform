@@ -4,16 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import socket
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.user import User
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
 from testlyn_api.services.webhooks import EVENTS, WebhookDispatcher, _sign
+
+# Resolve every webhook hostname to a public IP so the SSRF guard
+# (_assert_safe_url, now also enforced on create/update) passes offline in CI.
+_PUBLIC_ADDRINFO = [
+    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+]
+
+
+@pytest.fixture(autouse=True)
+def _mock_public_dns():
+    with patch("socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO):
+        yield
 
 # ─── Unit: HMAC helper ────────────────────────────────────────────────────────
 
@@ -305,6 +319,123 @@ async def test_dispatcher_fire_creates_delivery(db_session: AsyncSession) -> Non
             ids = await dispatcher.fire(org_id, "test.completed", {"run_id": "r1"})
 
     assert len(ids) == 1
+
+
+# ─── RBAC: webhook admin requires admin for mutations (finding #5) ────────────
+
+
+async def _set_role(session: AsyncSession, org_id: uuid.UUID, role: str) -> None:
+    await session.execute(
+        update(OrgMember)
+        .where(OrgMember.org_id == org_id, OrgMember.user_id == _DEV_USER_ID)
+        .values(role=role)
+    )
+    await session.commit()
+
+
+async def _create_endpoint_as_owner(client: AsyncClient, org_id: uuid.UUID) -> str:
+    resp = await client.post(
+        f"/v1/webhooks-admin/orgs/{org_id}/endpoints",
+        json={"url": "https://example.com/hook", "events": ["test.completed"]},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+@pytest.mark.parametrize("role,expected", [("viewer", 403), ("member", 403), ("admin", 201)])
+@pytest.mark.asyncio
+async def test_create_endpoint_requires_admin(
+    client: AsyncClient, db_session: AsyncSession, role: str, expected: int
+) -> None:
+    org_id = await _seed_org(db_session)
+    await _set_role(db_session, org_id, role)
+    resp = await client.post(
+        f"/v1/webhooks-admin/orgs/{org_id}/endpoints",
+        json={"url": "https://example.com/hook", "events": ["test.completed"]},
+    )
+    assert resp.status_code == expected, resp.text
+
+
+@pytest.mark.parametrize("role,expected", [("viewer", 403), ("member", 403), ("admin", 200)])
+@pytest.mark.asyncio
+async def test_patch_endpoint_requires_admin(
+    client: AsyncClient, db_session: AsyncSession, role: str, expected: int
+) -> None:
+    org_id = await _seed_org(db_session)
+    ep_id = await _create_endpoint_as_owner(client, org_id)
+    await _set_role(db_session, org_id, role)
+    resp = await client.patch(
+        f"/v1/webhooks-admin/endpoints/{ep_id}", json={"active": False}
+    )
+    assert resp.status_code == expected, resp.text
+
+
+@pytest.mark.parametrize("role,expected", [("viewer", 403), ("member", 403), ("admin", 204)])
+@pytest.mark.asyncio
+async def test_delete_endpoint_requires_admin(
+    client: AsyncClient, db_session: AsyncSession, role: str, expected: int
+) -> None:
+    org_id = await _seed_org(db_session)
+    ep_id = await _create_endpoint_as_owner(client, org_id)
+    await _set_role(db_session, org_id, role)
+    resp = await client.delete(f"/v1/webhooks-admin/endpoints/{ep_id}")
+    assert resp.status_code == expected, resp.text
+
+
+@pytest.mark.parametrize("role,expected", [("viewer", 403), ("member", 403), ("admin", 200)])
+@pytest.mark.asyncio
+async def test_replay_delivery_requires_admin(
+    client: AsyncClient, db_session: AsyncSession, role: str, expected: int
+) -> None:
+    org_id = await _seed_org(db_session)
+    ep_id = uuid.UUID(await _create_endpoint_as_owner(client, org_id))
+    delivery = WebhookDelivery(
+        endpoint_id=ep_id,
+        event_type="test.completed",
+        payload={"run_id": "rbac"},
+        status="abandoned",
+        attempts=6,
+    )
+    db_session.add(delivery)
+    await db_session.commit()
+    await db_session.refresh(delivery)
+    await _set_role(db_session, org_id, role)
+
+    with patch(
+        "testlyn_api.routers.webhooks_admin._deliver_standalone",
+        new=AsyncMock(return_value=None),
+    ):
+        resp = await client.post(f"/v1/webhooks-admin/deliveries/{delivery.id}/replay")
+    assert resp.status_code == expected, resp.text
+
+
+# ─── SSRF: destination URL validated on create/update ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_endpoint_rejects_ssrf_url(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Even an admin cannot register a metadata/internal destination URL."""
+    org_id = await _seed_org(db_session)  # dev user is owner (>= admin)
+    resp = await client.post(
+        f"/v1/webhooks-admin/orgs/{org_id}/endpoints",
+        json={"url": "http://metadata.google.internal/x", "events": ["test.completed"]},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_patch_endpoint_rejects_ssrf_url(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    org_id = await _seed_org(db_session)
+    ep_id = await _create_endpoint_as_owner(client, org_id)
+    resp = await client.patch(
+        f"/v1/webhooks-admin/endpoints/{ep_id}",
+        json={"url": "http://169.254.169.254/latest/meta-data/"},
+    )
+    assert resp.status_code == 422, resp.text
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

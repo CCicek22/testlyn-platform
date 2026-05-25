@@ -124,6 +124,15 @@ async def list_schedules(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> list[ScheduleOut]:
+    # Tenant isolation: caller must be a member of the org they're listing.
+    try:
+        org_uuid = uuid.UUID(org_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id"
+        ) from None
+    await _enforce_perm("read", "test", user_id=current_user.id, org_id=org_uuid, session=session)
+
     handles = await svc.list_schedules(org_id)
     # Merge with local registry to cover local-mode handles not returned by cloud
     local_handles = [h for h in _registry.values() if h.org_id == org_id]

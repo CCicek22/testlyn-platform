@@ -7,8 +7,9 @@ import structlog
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
-from testlyn_api.models.org import Organization, OrgMember
+from testlyn_api.models.org import Organization
 from testlyn_api.models.project import Project
 from testlyn_api.schemas.project import ProjectCreate, ProjectOut
 
@@ -28,7 +29,14 @@ async def create_project(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> ProjectOut:
-    await _assert_org_member(org_id, current_user.id, session)
+    # Org must exist (404) before we evaluate permissions.
+    result = await session.execute(select(Organization).where(Organization.id == org_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    # ("write", "project") requires at least 'member' per the RBAC matrix —
+    # viewers must not be able to mutate tenant state.
+    await _enforce_perm("write", "project", user_id=current_user.id, org_id=org_id, session=session)
 
     project = Project(org_id=org_id, name=body.name, slug=_slugify(body.name))
     session.add(project)
@@ -37,15 +45,3 @@ async def create_project(
 
     log.info("project.created", project_id=str(project.id), org_id=str(org_id))
     return ProjectOut.model_validate(project)
-
-
-async def _assert_org_member(org_id: uuid.UUID, user_id: uuid.UUID, session: SessionDep) -> None:
-    result = await session.execute(select(Organization).where(Organization.id == org_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
-
-    result2 = await session.execute(
-        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user_id)
-    )
-    if result2.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member")

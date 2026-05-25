@@ -390,8 +390,99 @@ async def test_api_bearer_token_rejected_when_bypass_disabled(
     class _FakeSettings:
         dev_auth_bypass = False
         scim_enabled = True
+        scim_tokens: dict[str, str] = {}
 
     # Patch where the router module resolves get_settings (its own import reference)
     monkeypatch.setattr(scim_router_mod, "get_settings", lambda: _FakeSettings())
     resp = await client.get(f"/v2/scim/{dev_org_id}/Users")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Bearer-token verification (per-org SCIM secret) — finding #2
+# ---------------------------------------------------------------------------
+
+
+def _patch_scim_settings(
+    monkeypatch: pytest.MonkeyPatch, tokens: dict[str, str]
+) -> None:
+    """Patch the scim router's settings: bypass off, SCIM on, given token map."""
+    import testlyn_api.routers.scim as scim_router_mod
+
+    class _FakeSettings:
+        dev_auth_bypass = False
+        scim_enabled = True
+        scim_tokens = tokens
+
+    monkeypatch.setattr(scim_router_mod, "get_settings", lambda: _FakeSettings())
+
+
+@pytest.mark.asyncio
+async def test_api_random_bearer_rejected(
+    client: AsyncClient, dev_org_id: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A random non-empty bearer that is not the org's configured token → 401."""
+    _patch_scim_settings(monkeypatch, {str(dev_org_id).lower(): "the-real-token"})
+    resp = await client.get(
+        f"/v2/scim/{dev_org_id}/Users",
+        headers={"Authorization": "Bearer totally-wrong-token"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_api_unconfigured_org_rejected(
+    client: AsyncClient, dev_org_id: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed: an org with no configured SCIM token rejects every token."""
+    _patch_scim_settings(monkeypatch, {})  # no tokens configured at all
+    resp = await client.get(
+        f"/v2/scim/{dev_org_id}/Users",
+        headers={"Authorization": "Bearer any-token"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_api_cross_org_token_rejected(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_org_id: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Org A's valid token must NOT authorize requests against org B → 401."""
+    org_b = await _make_org(db_session)
+    # Token configured ONLY for org A (dev_org_id)
+    _patch_scim_settings(monkeypatch, {str(dev_org_id).lower(): "org-a-token"})
+    resp = await client.get(
+        f"/v2/scim/{org_b.id}/Users",
+        headers={"Authorization": "Bearer org-a-token"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_api_valid_token_accepted(
+    client: AsyncClient, dev_org_id: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The org's correctly-configured token authorizes the request → 200."""
+    _patch_scim_settings(monkeypatch, {str(dev_org_id).lower(): "org-a-token"})
+    resp = await client.get(
+        f"/v2/scim/{dev_org_id}/Users",
+        headers={"Authorization": "Bearer org-a-token"},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_api_mutator_blocked_before_side_effects(
+    client: AsyncClient, dev_org_id: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bad token on POST /Users must 401 before any user is provisioned."""
+    _patch_scim_settings(monkeypatch, {str(dev_org_id).lower(): "org-a-token"})
+    resp = await client.post(
+        f"/v2/scim/{dev_org_id}/Users",
+        headers={"Authorization": "Bearer wrong"},
+        json={"userName": "should-not-be-created@example.com"},
+    )
     assert resp.status_code == 401

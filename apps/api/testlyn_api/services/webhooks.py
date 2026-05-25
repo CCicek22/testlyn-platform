@@ -22,90 +22,25 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import ipaddress
-import socket
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Final
-from urllib.parse import urlsplit
 
 import httpx
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
 
 log = structlog.get_logger(__name__)
 
-# Hosts that must never be reached even if DNS would resolve them to a
-# routable IP (defense in depth — covers the GCP metadata server alias).
-_BLOCKED_HOSTS: Final[frozenset[str]] = frozenset(
-    {"metadata.google.internal", "169.254.169.254"}
-)
-
-
-class UnsafeWebhookURL(ValueError):
-    """Raised when a webhook target URL fails the SSRF safety check."""
-
-
-def _assert_safe_url(url: str) -> None:
-    """Reject URLs that could be used for SSRF.
-
-    Validates the scheme, then resolves the hostname to ALL of its IPs and
-    rejects the request if ANY resolved address is private/loopback/link-local/
-    reserved/multicast/unspecified (which covers RFC1918, ::1, the
-    169.254.169.254 cloud-metadata IP, etc.). Hosts that fail to resolve are
-    also rejected.
-
-    KNOWN LIMITATION (DNS rebinding / TOCTOU): we validate the IPs returned by
-    getaddrinfo() here, but httpx re-resolves the hostname when it actually
-    connects, so a hostname whose DNS flips between this check and the connect
-    could still point at a private IP. Full mitigation requires pinning the
-    connection to a validated IP (custom transport). Accepted as a documented
-    limitation for this surgical pass; redirect-following is disabled in _post
-    to close the most common bypass.
-    """
-    parts = urlsplit(url)
-    scheme = parts.scheme.lower()
-    if scheme not in ("http", "https"):
-        raise UnsafeWebhookURL(f"scheme not allowed: {scheme or '(none)'}")
-
-    host = parts.hostname
-    if not host:
-        raise UnsafeWebhookURL("no host in url")
-
-    if host.lower() in _BLOCKED_HOSTS:
-        raise UnsafeWebhookURL(f"host explicitly blocked: {host}")
-
-    port = parts.port or (443 if scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as exc:
-        raise UnsafeWebhookURL(f"host does not resolve: {host}") from exc
-
-    if not infos:
-        raise UnsafeWebhookURL(f"host does not resolve: {host}")
-
-    for info in infos:
-        ip_str = info[4][0]
-        ip = ipaddress.ip_address(ip_str)
-        # Normalize IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) to the
-        # embedded IPv4 so the private/link-local checks fire regardless of
-        # Python version (IPv6Address.is_private only delegates to the mapped
-        # v4 on 3.13+). getattr is None for a plain IPv4Address.
-        mapped = getattr(ip, "ipv4_mapped", None)
-        if mapped is not None:
-            ip = mapped
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            raise UnsafeWebhookURL(f"resolved to disallowed ip: {ip_str}")
+# The SSRF guard now lives in core/url_safety.py so the scanner products reuse
+# the identical policy. These module-level aliases preserve the historical
+# names used by this module and its tests — behavior is unchanged.
+UnsafeWebhookURL = UnsafeURL
+_assert_safe_url = assert_safe_url
 
 # Canonical event taxonomy for Phase 3.
 EVENTS: Final[set[str]] = {

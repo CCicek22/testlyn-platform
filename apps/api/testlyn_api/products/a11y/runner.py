@@ -121,6 +121,10 @@ class A11yRunner:
                                 f"{settings.api_base_url}"
                                 f"/v1/internal/runs/{test_run_id}/complete"
                             ),
+                            # Shared secret the entrypoint echoes back on its
+                            # callback so the API's X-Internal-Token gate accepts
+                            # it (parity with the load + security engines).
+                            "INTERNAL_TOKEN": settings.internal_token,
                             **env,
                         }.items()
                     ]

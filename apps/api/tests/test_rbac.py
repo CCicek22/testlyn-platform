@@ -317,6 +317,99 @@ async def test_project_override_elevates_viewer_to_member(
     assert resp_with_override.status_code == 201
 
 
+# ── Viewer cannot create project (member-only) ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_create_project(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_user_id: uuid.UUID,
+) -> None:
+    """viewer role must get 403 on POST /v1/orgs/{org_id}/projects (write:project=member)."""
+    org_id = await _create_org(client, "ViewerProjOrg")
+    await _set_role(db_session, org_id, dev_user_id, "viewer")
+
+    resp = await client.post(
+        f"/v1/orgs/{org_id}/projects",
+        json={"name": "ShouldFail", "slug": "should-fail"},
+    )
+    assert resp.status_code == 403
+    detail = resp.json()["detail"].lower()
+    assert "viewer" in detail or "member" in detail
+
+
+@pytest.mark.asyncio
+async def test_member_can_create_project(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_user_id: uuid.UUID,
+) -> None:
+    """member role must succeed on POST /v1/orgs/{org_id}/projects."""
+    org_id = await _create_org(client, "MemberProjOrg")
+    await _set_role(db_session, org_id, dev_user_id, "member")
+
+    resp = await client.post(
+        f"/v1/orgs/{org_id}/projects",
+        json={"name": "Ok Project", "slug": "ok-project"},
+    )
+    assert resp.status_code == 201
+
+
+# ── Schedule listing enforces org membership ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_schedules_cross_org_denied(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """Listing schedules for an org the caller does not belong to → 403."""
+    from testlyn_api.models.org import Organization
+
+    other_org_id = uuid.uuid4()
+    other = Organization(
+        id=other_org_id,
+        name="OtherSchedOrg",
+        slug=f"other-sched-{uuid.uuid4().hex[:6]}",
+    )
+    db_session.add(other)
+    await db_session.commit()  # dev user is NOT a member of this org
+
+    resp = await client.get(f"/v1/schedules?org_id={other_org_id}")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_schedules_own_org_allowed(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch,
+) -> None:
+    """Caller who is a member of the org can list its schedules (200)."""
+    from testlyn_api.routers import schedules as sched_router
+
+    async def _empty(_org_id: str):
+        return []
+
+    monkeypatch.setattr(sched_router.svc, "list_schedules", _empty)
+
+    org_id = await _create_org(client, "OwnSchedOrg")  # dev user is owner
+
+    resp = await client.get(f"/v1/schedules?org_id={org_id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_schedules_invalid_org_id_400(
+    client: AsyncClient,
+) -> None:
+    """Non-UUID org_id is rejected with 400 before any service call."""
+    resp = await client.get("/v1/schedules?org_id=not-a-uuid")
+    assert resp.status_code == 400
+
+
 @pytest.mark.asyncio
 async def test_project_override_restricts_admin_to_viewer(
     client: AsyncClient,

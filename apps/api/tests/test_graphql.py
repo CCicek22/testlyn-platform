@@ -59,19 +59,41 @@ async def test_graphql_org_not_found(client: AsyncClient) -> None:
     assert body["data"]["org"] is None
 
 
-async def test_graphql_org_found(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_graphql_org_found(
+    client: AsyncClient, db_session: AsyncSession, dev_user_id
+) -> None:
     import uuid
 
-    from testlyn_api.models.org import Organization
+    from testlyn_api.models.org import Organization, OrgMember
 
     org_id = uuid.uuid4()
     org = Organization(id=org_id, name="GQL Org", slug="gql-org")
     db_session.add(org)
+    await db_session.flush()
+    # Caller must be a member to read the org (tenant isolation).
+    db_session.add(OrgMember(org_id=org_id, user_id=dev_user_id, role="viewer"))
     await db_session.commit()
 
     data = await _gql(client, f'{{ org(id: "{org_id}") {{ id name slug }} }}')
     assert data["org"]["name"] == "GQL Org"
     assert data["org"]["slug"] == "gql-org"
+
+
+async def test_graphql_org_cross_tenant_denied(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A user who is not a member of org B cannot read it via GraphQL → null."""
+    import uuid
+
+    from testlyn_api.models.org import Organization
+
+    org_id = uuid.uuid4()
+    org = Organization(id=org_id, name="Other Tenant", slug="other-tenant-org")
+    db_session.add(org)
+    await db_session.commit()  # dev user is NOT a member
+
+    data = await _gql(client, f'{{ org(id: "{org_id}") {{ id name }} }}')
+    assert data["org"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -86,10 +108,12 @@ async def test_graphql_tests_empty(client: AsyncClient) -> None:
     assert data["tests"] == []
 
 
-async def test_graphql_tests_returns_rows(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_graphql_tests_returns_rows(
+    client: AsyncClient, db_session: AsyncSession, dev_user_id
+) -> None:
     import uuid
 
-    from testlyn_api.models.org import Organization
+    from testlyn_api.models.org import Organization, OrgMember
     from testlyn_api.models.project import Project
     from testlyn_api.models.test import Test
 
@@ -97,6 +121,9 @@ async def test_graphql_tests_returns_rows(client: AsyncClient, db_session: Async
     project_id = uuid.uuid4()
     org = Organization(id=org_id, name="Org", slug="org-gql-tests")
     db_session.add(org)
+    await db_session.flush()
+    # Caller must be a member of the owning org to list tests.
+    db_session.add(OrgMember(org_id=org_id, user_id=dev_user_id, role="viewer"))
     await db_session.flush()
     project = Project(id=project_id, name="Proj", slug="proj-gql-tests", org_id=org_id)
     db_session.add(project)
@@ -117,6 +144,38 @@ async def test_graphql_tests_returns_rows(client: AsyncClient, db_session: Async
     assert data["tests"][0]["product"] == "load"
 
 
+async def test_graphql_tests_cross_tenant_denied(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Tests under a project in another org are not visible → empty list."""
+    import uuid
+
+    from testlyn_api.models.org import Organization
+    from testlyn_api.models.project import Project
+    from testlyn_api.models.test import Test
+
+    org_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    org = Organization(id=org_id, name="Other", slug="other-tenant-tests")
+    db_session.add(org)
+    await db_session.flush()
+    project = Project(id=project_id, name="P", slug="proj-other-tenant", org_id=org_id)
+    db_session.add(project)
+    await db_session.flush()
+    t = Test(
+        id=uuid.uuid4(),
+        name="Secret Test",
+        product="load",
+        project_id=project_id,
+        config={},
+    )
+    db_session.add(t)
+    await db_session.commit()  # dev user is NOT a member of this org
+
+    data = await _gql(client, f'{{ tests(projectId: "{project_id}") {{ id name }} }}')
+    assert data["tests"] == []
+
+
 # ---------------------------------------------------------------------------
 # runs query
 # ---------------------------------------------------------------------------
@@ -126,6 +185,68 @@ async def test_graphql_runs_empty(client: AsyncClient) -> None:
     import uuid
 
     data = await _gql(client, f'{{ runs(testId: "{uuid.uuid4()}") {{ id }} }}')
+    assert data["runs"] == []
+
+
+async def test_graphql_runs_returns_rows_for_member(
+    client: AsyncClient, db_session: AsyncSession, dev_user_id
+) -> None:
+    """Member can read runs; status maps from TestRun.state (regression for r.status)."""
+    import uuid
+
+    from testlyn_api.models.org import Organization, OrgMember
+    from testlyn_api.models.project import Project
+    from testlyn_api.models.test import Test
+    from testlyn_api.models.test_run import TestRun
+
+    org_id = uuid.uuid4()
+    org = Organization(id=org_id, name="MyOrg", slug="myorg-runs")
+    db_session.add(org)
+    await db_session.flush()
+    db_session.add(OrgMember(org_id=org_id, user_id=dev_user_id, role="member"))
+    await db_session.flush()
+    project = Project(id=uuid.uuid4(), name="P", slug="proj-runs", org_id=org_id)
+    db_session.add(project)
+    await db_session.flush()
+    t = Test(id=uuid.uuid4(), name="T", product="load", project_id=project.id, config={})
+    db_session.add(t)
+    await db_session.flush()
+    run = TestRun(id=uuid.uuid4(), test_id=t.id, product="load", state="completed")
+    db_session.add(run)
+    await db_session.commit()
+
+    data = await _gql(client, f'{{ runs(testId: "{t.id}") {{ id status product }} }}')
+    assert len(data["runs"]) == 1
+    assert data["runs"][0]["status"] == "completed"
+    assert data["runs"][0]["product"] == "load"
+
+
+async def test_graphql_runs_cross_tenant_denied(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Runs for a test in another org are not visible → empty list."""
+    import uuid
+
+    from testlyn_api.models.org import Organization
+    from testlyn_api.models.project import Project
+    from testlyn_api.models.test import Test
+    from testlyn_api.models.test_run import TestRun
+
+    org_id = uuid.uuid4()
+    org = Organization(id=org_id, name="OtherRuns", slug="other-tenant-runs")
+    db_session.add(org)
+    await db_session.flush()
+    project = Project(id=uuid.uuid4(), name="P", slug="proj-other-runs", org_id=org_id)
+    db_session.add(project)
+    await db_session.flush()
+    t = Test(id=uuid.uuid4(), name="T", product="load", project_id=project.id, config={})
+    db_session.add(t)
+    await db_session.flush()
+    run = TestRun(id=uuid.uuid4(), test_id=t.id, product="load", state="completed")
+    db_session.add(run)
+    await db_session.commit()  # dev user is NOT a member of this org
+
+    data = await _gql(client, f'{{ runs(testId: "{t.id}") {{ id status }} }}')
     assert data["runs"] == []
 
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from testlyn_api.core.permissions import _enforce_perm
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.project import Project
 from testlyn_api.models.target import Target
@@ -65,6 +66,24 @@ async def one_shot_audit(
         project_id=project.id,
         session=session,
     )
+
+    # SSRF guard: the audit URLs are fetched by Playwright inside the worker, so
+    # reject private/loopback/link-local/reserved/metadata targets before the
+    # job is enqueued (mirrors the webhook delivery guard).
+    for url in body.config.urls:
+        try:
+            assert_safe_url(str(url))
+        except UnsafeURL as exc:
+            log.warning(
+                "a11y.audit.unsafe_url",
+                url=str(url),
+                reason=str(exc),
+                user_id=str(current_user.id),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="target URL is not allowed",
+            ) from exc
 
     result = await _runner.launch(
         test_run_id=body.test_run_id,
