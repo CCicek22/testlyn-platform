@@ -80,14 +80,24 @@ structlog.configure(
     cache_logger_on_first_use=True,
 )
 
+def _docs_kwargs(settings: Settings) -> dict[str, str | None]:
+    """Return docs URL kwargs for FastAPI, gated on settings.expose_docs.
+
+    When expose_docs is False (prod), all three of /docs, /redoc and
+    /openapi.json are disabled (set to None) so the schema isn't exposed.
+    """
+    if settings.expose_docs:
+        return {"docs_url": "/docs", "redoc_url": "/redoc"}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+settings = get_settings()
 app = FastAPI(
     title="Testlyn API",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    **_docs_kwargs(settings),
 )
 
-settings = get_settings()
 init_firebase()
 configure_vertex_backend(settings)
 

@@ -9,9 +9,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.core.ip_allowlist import (
+    AllowlistDBError,
     _cache,
     _extract_client_ip,
     _ip_in_cidr_list,
+    _load_cidrs,
     invalidate_cache,
 )
 from testlyn_api.models.org import Organization
@@ -212,6 +214,45 @@ async def test_middleware_skips_non_v1_paths(
 
 
 @pytest.mark.asyncio
+async def test_org_resolved_from_token_on_non_orgs_route(
+    client: AsyncClient,
+    dev_org_id: uuid.UUID,
+) -> None:
+    """Authenticated user's org is resolved from the verified token (via DB),
+    so the allowlist now enforces on a route WITHOUT an /orgs/{id} segment.
+
+    Proves the fix: previously _extract_org_id could only get org_id from the
+    URL path, so allowlist was bypassed on every non-/v1/orgs route.
+    """
+    invalidate_cache(str(dev_org_id))
+
+    with (
+        patch(
+            "testlyn_api.core.token_verify.verify_token",
+            return_value={"uid": "member-uid", "email": "m@x.com"},
+        ),
+        patch(
+            "testlyn_api.core.org_context.resolve_org_and_plan",
+            new=AsyncMock(return_value=(str(dev_org_id), "pro")),
+        ),
+        patch(
+            "testlyn_api.core.ip_allowlist._load_cidrs",
+            new=AsyncMock(return_value=["10.0.0.0/8"]),
+        ),
+    ):
+        # /v1/tests has NO /orgs/{id} segment — org_id can only come from token.
+        resp = await client.get(
+            "/v1/tests",
+            headers={
+                "Authorization": "Bearer fake.jwt.token",
+                "X-Forwarded-For": "1.2.3.4",  # outside 10.0.0.0/8
+            },
+        )
+    assert resp.status_code == 403
+    assert "not allowed" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_middleware_cache_invalidation(
     client: AsyncClient,
     dev_org_id: uuid.UUID,
@@ -233,3 +274,43 @@ async def test_middleware_cache_invalidation(
     # Next middleware request will re-load (no entries in DB → allow-all)
     resp = await client.get(f"/v1/orgs/{dev_org_id}/sso-providers")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Fail-CLOSED on DB error (operator decision 2026-05-24)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_load_cidrs_raises_on_db_error() -> None:
+    """A DB failure must raise AllowlistDBError, NOT collapse to allow-all []."""
+    org_id = str(uuid.uuid4())  # valid UUID so the failure is the session, not parse
+    invalidate_cache(org_id)
+    with patch(
+        "testlyn_api.core.db._session_factory",
+        side_effect=RuntimeError("connection refused"),
+    ):
+        with pytest.raises(AllowlistDBError):
+            await _load_cidrs(org_id)
+    # Must NOT cache the failure — next call retries the DB.
+    assert org_id not in _cache
+
+
+@pytest.mark.asyncio
+async def test_middleware_denies_on_db_error(
+    client: AsyncClient,
+    dev_org_id: uuid.UUID,
+) -> None:
+    """DB error while loading CIDRs → 403 deny (fail closed), distinct from
+    the zero-entries allow-all path."""
+    invalidate_cache(str(dev_org_id))
+    with patch(
+        "testlyn_api.core.ip_allowlist._load_cidrs",
+        new=AsyncMock(side_effect=AllowlistDBError(str(dev_org_id))),
+    ):
+        resp = await client.get(
+            f"/v1/orgs/{dev_org_id}/sso-providers",
+            headers={"X-Forwarded-For": "10.0.0.5"},  # would pass if it were allow-all
+        )
+    assert resp.status_code == 403
+    assert "temporarily unavailable" in resp.json()["detail"]

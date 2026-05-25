@@ -27,6 +27,7 @@ class RunOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     summary_uri: str | None
+    report_uri: str | None
     error_reason: str | None
     triggered_by: uuid.UUID | None
     created_at: datetime
@@ -49,6 +50,7 @@ class RunOut(BaseModel):
             started_at=run.started_at,
             finished_at=run.finished_at,
             summary_uri=run.summary_uri,
+            report_uri=run.report_uri,
             error_reason=run.error_reason,
             triggered_by=run.triggered_by,
             created_at=run.created_at,
@@ -61,3 +63,7 @@ class RunCompletePayload(BaseModel):
     exit_code: int
     summary_uri: str | None = None
     error_reason: str | None = None
+
+
+class ReportReadyPayload(BaseModel):
+    report_gcs_uri: str

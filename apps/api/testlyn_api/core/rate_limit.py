@@ -183,7 +183,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     Identity resolution order:
       1. ``X-Api-Key`` header → org_id from DB lookup (TODO: cache)
-      2. ``Authorization: Bearer <jwt>`` → org_id from JWT claim
+      2. ``Authorization: Bearer <jwt>`` → verified uid → (org_id, plan)
+         resolved from the DB via ``core.org_context`` (cached). There is no
+         ``org_id`` JWT claim; the plan must be live, so it comes from Postgres.
       3. Unauthenticated → apply ``free`` tier against the remote IP
     """
 
@@ -229,12 +231,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         Identity sources, in priority order:
         - X-Api-Key present → use hashed prefix as bucket key.
-        - Bearer JWT → verify via Firebase (``token_verify.verify_token``)
-          and use the verified ``org_id`` claim if present. Unverified
-          payloads are NEVER trusted — an attacker could otherwise base64-
-          encode any org_id and steal another tenant's rate budget.
+        - Bearer JWT → verify via Firebase (``token_verify.verify_token``) then
+          resolve the org_id AND live plan from Postgres via
+          ``org_context.resolve_org_and_plan`` (the verified token only carries
+          ``uid`` — there is no ``org_id``/``plan`` claim). Unverified payloads
+          are NEVER trusted — verification happens first, so an attacker cannot
+          base64-encode a uid to steal another tenant's rate budget. The plan is
+          read from the DB (cached) so paid tiers get their real RPM bucket
+          instead of the free 60.
         - Fallback → remote IP, free tier.
         """
+        from testlyn_api.core.org_context import resolve_org_and_plan
         from testlyn_api.core.token_verify import extract_bearer, verify_token
 
         # --- X-Api-Key ---
@@ -248,9 +255,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if token is not None:
             claims = verify_token(token)
             if claims is not None:
-                org_id = claims.get("org_id") or claims.get("orgId")
-                if org_id:
-                    return str(org_id), "free"  # plan lookup deferred to service layer
+                # Firebase verified tokens expose the user id as ``uid``; accept
+                # the standard JWT ``sub``/``user_id`` aliases defensively.
+                uid = claims.get("uid") or claims.get("user_id") or claims.get("sub")
+                if uid:
+                    # Cached DB lookup — one hit per user per TTL, not per request.
+                    org_id, plan = await resolve_org_and_plan(str(uid))
+                    if org_id is not None:
+                        return org_id, plan
 
         # --- Fallback: IP-based ---
         client_ip = (request.client.host if request.client else "unknown")

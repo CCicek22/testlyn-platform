@@ -76,15 +76,20 @@ async def _enqueue_cloud_tasks(run_id: uuid.UUID) -> None:
 
     url = f"{settings.api_base_url}/v1/internal/runs/{run_id}/start"
 
+    # Internal endpoints are gated by a shared secret (X-Internal-Token), not
+    # OIDC. The Cloud Tasks task carries the secret in the header; the API
+    # verifies it in _verify_internal_token.
+    if not settings.internal_token:
+        log.warning("tasks.internal_token_unset", run_id=str(run_id))
+
     task = tasks_v2.Task(
         http_request=tasks_v2.HttpRequest(
             http_method=tasks_v2.HttpMethod.POST,
             url=url,
-            oidc_token=tasks_v2.OidcToken(
-                service_account_email=f"testlyn-api@{project_id}.iam.gserviceaccount.com",
-                audience=url,
-            ),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Internal-Token": settings.internal_token,
+            },
             body=json.dumps({"run_id": str(run_id)}).encode(),
         )
     )

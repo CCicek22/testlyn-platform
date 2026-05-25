@@ -74,8 +74,6 @@ async def run_report(
     )
 
     # Step 3: Notify API
-    # TODO: Ensure the API endpoint POST /v1/internal/runs/{run_id}/report-ready exists.
-    # It should accept {"report_gcs_uri": str} and mark the run record with the PDF URI.
     await _notify_api(run_id=run_id, report_gcs_uri=result.gcs_uri)
 
     log.info("run_report.done", run_id=run_id, gcs_uri=result.gcs_uri)
@@ -85,9 +83,11 @@ async def run_report(
 async def _notify_api(*, run_id: str, report_gcs_uri: str) -> None:
     url = f"{API_BASE_URL}/v1/internal/runs/{run_id}/report-ready"
     payload = {"report_gcs_uri": report_gcs_uri}
+    # Internal endpoints are gated by a shared secret (X-Internal-Token).
+    headers = {"X-Internal-Token": os.getenv("INTERNAL_TOKEN", "")}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
         log.info("run_report.callback_ok", run_id=run_id, status=resp.status_code)
     except Exception:

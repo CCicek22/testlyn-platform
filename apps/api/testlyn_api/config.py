@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # --- Mode ---
     run_mode: str = "cloud"  # 'cloud' | 'docker'
 
+    # --- Docs ---
+    # Expose /docs, /redoc, /openapi.json. Default True for local + dev; set
+    # EXPOSE_DOCS=false in prod to disable all three (returns 404).
+    expose_docs: bool = True
+
     # --- Internal service auth ---
     # Shared secret for /v1/internal/* endpoints (Cloud Tasks → API).
     # Optional in docker mode; required in cloud mode when set.

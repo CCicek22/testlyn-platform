@@ -10,9 +10,10 @@ from sqlalchemy import select
 
 from testlyn_api.core.runner_registry import RUNNERS
 from testlyn_api.deps import SessionDep
+from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test
 from testlyn_api.models.test_run import TestRun
-from testlyn_api.schemas.test_run import RunCompletePayload, RunOut
+from testlyn_api.schemas.test_run import ReportReadyPayload, RunCompletePayload, RunOut
 
 log = structlog.get_logger(__name__)
 
@@ -74,6 +75,16 @@ async def start_run(
     config = test.config or {}
     script_uri = test.script_uri or ""
 
+    # Resolve org id (run → test → project → org) so the engine entrypoint,
+    # which hard-requires ORG_ID, can scope its GCS paths and k6 tags.
+    project_result = await session.execute(
+        select(Project).where(Project.id == test.project_id)
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    org_id = str(project.org_id)
+
     try:
         result = await runner.launch(
             test_run_id=run.id,
@@ -82,6 +93,7 @@ async def start_run(
             duration_seconds=config.get("duration_seconds", 30),
             env={
                 "RUN_ID": str(run.id),
+                "ORG_ID": org_id,
                 "SCRIPT_INLINE": test.script_inline or "",
             },
         )
@@ -138,6 +150,34 @@ async def complete_run(
     await session.refresh(run)
 
     log.info("run.completed", run_id=str(run_id), state=run.state)
+    return RunOut.from_run_and_test(run, test)
+
+
+@router.post("/runs/{run_id}/report-ready", response_model=RunOut)
+async def report_ready(
+    run_id: uuid.UUID,
+    body: ReportReadyPayload,
+    session: SessionDep,
+    x_internal_token: str | None = Header(default=None),
+) -> RunOut:
+    """Record the PDF report URI for a run.
+
+    Called by the report-builder once it has uploaded the rendered PDF to GCS.
+    """
+    _verify_internal_token(x_internal_token)
+    run = await _get_run_or_404(run_id, session)
+
+    test_result = await session.execute(select(Test).where(Test.id == run.test_id))
+    test = test_result.scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+
+    run.report_uri = body.report_gcs_uri
+
+    await session.commit()
+    await session.refresh(run)
+
+    log.info("run.report_ready", run_id=str(run_id), report_uri=run.report_uri)
     return RunOut.from_run_and_test(run, test)
 
 

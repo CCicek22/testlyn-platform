@@ -34,6 +34,7 @@ set -euo pipefail
 : "${CALLBACK_URL:?CALLBACK_URL is required}"
 
 # Optional with defaults
+INTERNAL_TOKEN="${INTERNAL_TOKEN:-}"
 VUS="${VUS:-10}"
 DURATION="${DURATION:-30s}"
 MAX_VUS="${MAX_VUS:-50000}"
@@ -174,11 +175,11 @@ _gcs_upload_dir() {
 
 _post_callback() {
     local status="${1}"
-    local token
-    token="$(_oidc_token)" 2>/dev/null || token=""
+    # Internal endpoints are gated by a shared secret (X-Internal-Token), not
+    # OIDC. The OIDC token is still used for GCS download/upload above.
     curl -fsS -X POST "${CALLBACK_URL}" \
         -H "Content-Type: application/json" \
-        ${token:+-H "Authorization: Bearer ${token}"} \
+        ${INTERNAL_TOKEN:+-H "X-Internal-Token: ${INTERNAL_TOKEN}"} \
         -d "{\"run_id\":\"${RUN_ID}\",\"status\":\"${status}\",\"exit_code\":${K6_EXIT}}" \
         --max-time 10 || true
 }

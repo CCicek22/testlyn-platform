@@ -109,3 +109,72 @@ async def test_cloud_correct_token_proceeds(
     )
     assert resp.status_code == 200
     assert resp.json()["state"] == "completed"
+
+
+# ─── report-ready endpoint ────────────────────────────────────────────────────
+
+_REPORT_URI = "gs://testlyn-prod-reports/org/run/report.pdf"
+
+
+@pytest.mark.asyncio
+async def test_report_ready_unconfigured_secret_returns_401(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch
+) -> None:
+    from testlyn_api.config import get_settings
+
+    cloud = get_settings().model_copy(
+        update={"run_mode": "cloud", "dev_auth_bypass": False, "internal_token": ""}
+    )
+    monkeypatch.setattr("testlyn_api.config.get_settings", lambda: cloud)
+
+    run_id = await _create_queued_run(db_session)
+    resp = await client.post(
+        f"/v1/internal/runs/{run_id}/report-ready",
+        json={"report_gcs_uri": _REPORT_URI},
+        headers={"X-Internal-Token": "anything"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_report_ready_no_token_returns_403(
+    client: AsyncClient, db_session: AsyncSession, cloud_mode_settings
+) -> None:
+    run_id = await _create_queued_run(db_session)
+    resp = await client.post(
+        f"/v1/internal/runs/{run_id}/report-ready",
+        json={"report_gcs_uri": _REPORT_URI},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_report_ready_wrong_token_returns_403(
+    client: AsyncClient, db_session: AsyncSession, cloud_mode_settings
+) -> None:
+    run_id = await _create_queued_run(db_session)
+    resp = await client.post(
+        f"/v1/internal/runs/{run_id}/report-ready",
+        json={"report_gcs_uri": _REPORT_URI},
+        headers={"X-Internal-Token": "wrong-token"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_report_ready_correct_token_persists_uri(
+    client: AsyncClient, db_session: AsyncSession, cloud_mode_settings
+) -> None:
+    run_id = await _create_queued_run(db_session)
+    resp = await client.post(
+        f"/v1/internal/runs/{run_id}/report-ready",
+        json={"report_gcs_uri": _REPORT_URI},
+        headers={"X-Internal-Token": _INTERNAL_TOKEN},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["report_uri"] == _REPORT_URI
+
+    # The persisted run row carries the report URI.
+    fetched = await db_session.get(TestRunModel, run_id)
+    assert fetched is not None
+    assert fetched.report_uri == _REPORT_URI

@@ -117,6 +117,11 @@ class K6Runner:
                             "BQ_DATASET": settings.gcp_bq_dataset,
                             "GCP_PROJECT": settings.gcp_project_id,
                             "CALLBACK_URL": f"{settings.api_base_url}/v1/internal/runs/{test_run_id}/complete",
+                            # Shared secret the engine echoes back on its callback
+                            # so the API's X-Internal-Token gate accepts it.
+                            "INTERNAL_TOKEN": settings.internal_token,
+                            # ORG_ID arrives via **env (resolved in start_run); the
+                            # engine entrypoint hard-requires it.
                             **env,
                         }.items()
                     ]

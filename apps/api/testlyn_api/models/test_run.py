@@ -31,6 +31,9 @@ class TestRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     summary_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # PDF report URI (distinct from summary_uri, which is the k6 summary JSON).
+    # Set by the report-builder via POST /v1/internal/runs/{id}/report-ready.
+    report_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     error_reason: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     triggered_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True

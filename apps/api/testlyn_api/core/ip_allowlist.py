@@ -62,26 +62,33 @@ def _ip_in_cidr_list(ip_str: str, cidrs: list[str]) -> bool:
     return False
 
 
-def _extract_org_id(request: Request) -> str | None:
+async def _extract_org_id(request: Request) -> str | None:
     """Extract org_id for allowlist keying.
 
     Security: never trusts an un-verified JWT payload. The Bearer token is
     verified via ``token_verify.verify_token`` (Firebase signature + expiry).
+    The verified token only carries ``uid`` (no ``org_id`` claim), so the org is
+    resolved from Postgres via ``org_context.resolve_org_and_plan`` (cached). This
+    lets the allowlist engage on EVERY ``/v1/`` route, not just ``/v1/orgs/{id}``.
+
     Falls back to path-based extraction (``/v1/orgs/{org_id}/...``) when no
     token is present — the org_id in the URL is still attacker-controlled
     here, but the allowlist only restricts the request *more* (never opens
     new access), so a forged path id can at most lock the caller out of an
     org they have no real access to.
     """
+    from testlyn_api.core.org_context import resolve_org_and_plan
     from testlyn_api.core.token_verify import extract_bearer, verify_token
 
     token = extract_bearer(request.headers.get("Authorization", ""))
     if token is not None:
         claims = verify_token(token)
         if claims is not None:
-            org_id = claims.get("org_id") or claims.get("orgId")
-            if org_id:
-                return str(org_id)
+            uid = claims.get("uid") or claims.get("user_id") or claims.get("sub")
+            if uid:
+                org_id, _plan = await resolve_org_and_plan(str(uid))
+                if org_id is not None:
+                    return org_id
 
     # Path-based extraction: /v1/orgs/{org_id}/...
     path = request.url.path
@@ -94,8 +101,23 @@ def _extract_org_id(request: Request) -> str | None:
     return None
 
 
+class AllowlistDBError(Exception):
+    """Raised when the allowlist CIDRs cannot be loaded from the DB.
+
+    Distinct from an org with zero configured entries: a DB error means we do
+    NOT know whether an allowlist applies, so the middleware fails CLOSED
+    (deny) rather than open. An empty result from a *successful* query stays
+    allow-all (org has no allowlist configured).
+    """
+
+
 async def _load_cidrs(org_id: str) -> list[str]:
-    """Load active CIDRs for the org from DB (with TTL cache)."""
+    """Load active CIDRs for the org from DB (with TTL cache).
+
+    Returns the (possibly empty) CIDR list on success. Raises
+    ``AllowlistDBError`` on any DB failure — the caller fails closed. A DB
+    error is never cached, so the next request retries the DB.
+    """
     now = time.monotonic()
     cached = _cache.get(org_id)
     if cached is not None and now < cached[1]:
@@ -118,8 +140,12 @@ async def _load_cidrs(org_id: str) -> list[str]:
             )
             cidrs = [row[0] for row in result.all()]
     except Exception as exc:
-        log.warning("ip_allowlist.db_error", exc=str(exc))
-        cidrs = []
+        # Fail CLOSED (operator decision 2026-05-24): a DB blip must NOT
+        # collapse to allow-all. Log at error as the alert signal — a
+        # log-based Cloud Monitoring alert policy matches this event. Do not
+        # cache the failure; re-raise so dispatch denies the request.
+        log.error("ip_allowlist.db_error_fail_closed", org_id=org_id, exc=str(exc))
+        raise AllowlistDBError(org_id) from exc
 
     _cache[org_id] = (cidrs, now + _CACHE_TTL)
     return cidrs
@@ -145,11 +171,23 @@ class IPAllowlistMiddleware(BaseHTTPMiddleware):
         if not request.url.path.startswith("/v1/"):
             return await call_next(request)
 
-        org_id = _extract_org_id(request)
+        org_id = await _extract_org_id(request)
         if org_id is None:
             return await call_next(request)
 
-        cidrs = await _load_cidrs(org_id)
+        try:
+            cidrs = await _load_cidrs(org_id)
+        except AllowlistDBError:
+            # Fail CLOSED on a DB error: we cannot confirm the request's IP is
+            # allowed, so deny rather than silently bypass the control. The
+            # alert is emitted in _load_cidrs (ip_allowlist.db_error_fail_closed).
+            log.error("ip_allowlist.denied_db_error", org_id=org_id, path=request.url.path)
+            return Response(
+                content='{"detail":"IP allowlist temporarily unavailable"}',
+                status_code=403,
+                headers={"Content-Type": "application/json"},
+            )
+
         if not cidrs:
             # No allowlist configured — allow all
             return await call_next(request)
