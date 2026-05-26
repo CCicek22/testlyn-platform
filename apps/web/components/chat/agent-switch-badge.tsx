@@ -9,10 +9,10 @@ interface AgentSwitchBadgeProps {
 
 /**
  * Inline pill shown when the coordinator hands off to a sub-agent.
- * Color = product accent if `to` matches a known product id, otherwise indigo.
+ * Color = product accent if `to` matches a known product id, otherwise primary signal.
  */
 export function AgentSwitchBadge({ to }: AgentSwitchBadgeProps) {
-  const accent = isProduct(to) ? getProduct(to).accent : "#3730A3";
+  const accent = isProduct(to) ? getProduct(to).accent : "#18F2C3";
   const label = isProduct(to) ? `${getProduct(to).label.toLowerCase()} agent` : `${to} agent`;
 
   return (

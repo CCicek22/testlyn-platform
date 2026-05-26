@@ -9,7 +9,7 @@ import { getProduct } from "@/lib/products";
 import type { TestRun, RunState, FunctionalRunSummary } from "@testlyn/shared";
 
 const PRODUCT = "functional";
-const ACCENT = getProduct(PRODUCT).accent; // #8B5CF6
+const ACCENT = getProduct(PRODUCT).accent; // #7CFFE1
 
 const STATE_STYLES: Record<RunState, string> = {
   queued:    "border-zinc-700 bg-zinc-800 text-zinc-400",

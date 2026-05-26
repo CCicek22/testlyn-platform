@@ -2,7 +2,7 @@
  * Public API reference page — /docs/api/v1
  *
  * Loads openapi-v1.yaml from the repo (server-side at build time) and renders
- * it via @scalar/api-reference-react with Testlyn's dark/indigo theme.
+ * it via @scalar/api-reference-react with Testlyn's dark/signal theme.
  *
  * The component is a React Server Component — no "use client" needed.
  */
@@ -53,12 +53,12 @@ export default function ApiV1ReferencePage() {
   const spec = loadOpenApiSpec();
 
   return (
-    <div className="min-h-screen bg-[#0A0A0B]">
+    <div className="min-h-screen bg-[#05090B]">
       {/* Page header */}
-      <div className="border-b border-zinc-800 bg-[#0A0A0B] px-6 py-8">
+      <div className="border-b border-zinc-800 bg-[#05090B] px-6 py-8">
         <div className="mx-auto max-w-6xl">
           <div className="flex items-center gap-3">
-            <span className="rounded bg-[#3730A3]/20 px-2 py-0.5 font-mono text-xs text-[#3730A3] ring-1 ring-[#3730A3]/30">
+            <span className="rounded bg-[#18F2C3]/20 px-2 py-0.5 font-mono text-xs text-[#18F2C3] ring-1 ring-[#18F2C3]/30">
               v1
             </span>
             <h1 className="text-xl font-semibold text-white">API Reference</h1>
@@ -95,15 +95,15 @@ export default function ApiV1ReferencePage() {
                 --scalar-color-1: #ffffff;
                 --scalar-color-2: #a1a1aa;
                 --scalar-color-3: #71717a;
-                --scalar-background-1: #0a0a0b;
-                --scalar-background-2: #111113;
-                --scalar-background-3: #18181b;
-                --scalar-border-color: #27272a;
-                --scalar-color-accent: #3730a3;
-                --scalar-sidebar-background-1: #0a0a0b;
+                --scalar-background-1: #05090b;
+                --scalar-background-2: #071115;
+                --scalar-background-3: #0d1b1f;
+                --scalar-border-color: rgba(171, 255, 236, 0.16);
+                --scalar-color-accent: #18f2c3;
+                --scalar-sidebar-background-1: #05090b;
                 --scalar-sidebar-color-1: #ffffff;
                 --scalar-sidebar-color-2: #a1a1aa;
-                --scalar-sidebar-border-color: #27272a;
+                --scalar-sidebar-border-color: rgba(171, 255, 236, 0.16);
               }
             `,
           }}

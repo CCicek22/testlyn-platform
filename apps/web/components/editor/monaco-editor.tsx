@@ -26,7 +26,7 @@ interface MonacoEditorProps {
   className?: string;
 }
 
-// Testlyn dark theme — matches #0A0A0B dark surface
+// Testlyn dark theme matched to the liquid-glass signal palette.
 const TESTLYN_THEME = "testlyn-dark";
 
 export function MonacoEditor({
@@ -43,21 +43,21 @@ export function MonacoEditor({
       inherit: true,
       rules: [
         { token: "comment", foreground: "6A7385", fontStyle: "italic" },
-        { token: "keyword", foreground: "A78BFA" },
-        { token: "string", foreground: "86EFAC" },
-        { token: "number", foreground: "FCA5A5" },
-        { token: "type", foreground: "7DD3FC" },
+        { token: "keyword", foreground: "7CFFE1" },
+        { token: "string", foreground: "5CFF93" },
+        { token: "number", foreground: "FFD166" },
+        { token: "type", foreground: "3DDCFF" },
       ],
       colors: {
-        "editor.background": "#0D0D0F",
-        "editor.foreground": "#F4F4F5",
-        "editor.lineHighlightBackground": "#1C1C21",
-        "editorLineNumber.foreground": "#52525B",
-        "editorLineNumber.activeForeground": "#A1A1AA",
-        "editor.selectionBackground": "#3730A340",
-        "editor.inactiveSelectionBackground": "#3730A320",
-        "editorCursor.foreground": "#A78BFA",
-        "editor.findMatchBackground": "#3730A360",
+        "editor.background": "#05090B",
+        "editor.foreground": "#E8FBFF",
+        "editor.lineHighlightBackground": "#0D1B1F",
+        "editorLineNumber.foreground": "#5D7378",
+        "editorLineNumber.activeForeground": "#B9FFF0",
+        "editor.selectionBackground": "#18F2C340",
+        "editor.inactiveSelectionBackground": "#18F2C320",
+        "editorCursor.foreground": "#18F2C3",
+        "editor.findMatchBackground": "#18F2C360",
         "scrollbarSlider.background": "#3F3F4680",
         "scrollbarSlider.hoverBackground": "#3F3F46B0",
       },

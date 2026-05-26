@@ -13,7 +13,7 @@ export default function AuthLayout({
           <LogoPulse size={24} />
         </Link>
       </header>
-      <main className="flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
+      <main className="test-grid flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
         {children}
       </main>
     </div>

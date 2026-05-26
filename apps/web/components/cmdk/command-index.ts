@@ -127,7 +127,7 @@ export function buildCommandIndex(
     keywords: [run.id, run.state, run.product, "run"],
     href: `/runs/${run.id}`,
     accent:
-      PRODUCTS.find((p) => p.id === run.product)?.accent ?? "#3730A3",
+      PRODUCTS.find((p) => p.id === run.product)?.accent ?? "#18F2C3",
   }));
 
   // Wire up sign-out action

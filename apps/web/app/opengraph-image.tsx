@@ -16,7 +16,7 @@ export default function OgImage() {
           justifyContent: "center",
           width: "100%",
           height: "100%",
-          background: "#0A0A0B",
+          background: "#05090B",
           padding: "80px",
           fontFamily: "sans-serif",
         }}
@@ -29,7 +29,7 @@ export default function OgImage() {
             viewBox="0 0 28 28"
             fill="none"
           >
-            <rect width="28" height="28" rx="6" fill="#3730A3" />
+            <rect width="28" height="28" rx="6" fill="#18F2C3" />
             <polyline
               points="3,14 7,14 9,8 11,20 13,10 15,18 17,12 19,16 21,14 25,14"
               stroke="white"
@@ -63,7 +63,7 @@ export default function OgImage() {
           }}
         >
           Load testing that lives{" "}
-          <span style={{ color: "#6366F1" }}>where your code does.</span>
+          <span style={{ color: "#18F2C3" }}>where your code does.</span>
         </div>
 
         {/* Subhead */}
@@ -94,11 +94,11 @@ export default function OgImage() {
           <span
             style={{
               fontSize: "14px",
-              color: "#3730A3",
-              background: "rgba(55,48,163,0.15)",
+              color: "#18F2C3",
+              background: "rgba(24,242,195,0.15)",
               padding: "6px 14px",
               borderRadius: "100px",
-              border: "1px solid rgba(55,48,163,0.3)",
+              border: "1px solid rgba(24,242,195,0.3)",
             }}
           >
             Phase 1 — Load Testing

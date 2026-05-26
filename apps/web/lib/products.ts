@@ -1,6 +1,6 @@
 /**
  * Client-side product registry.
- * Accent colors are frozen per CLAUDE.md §4 — do not change without user approval.
+ * Accent colors map QA product surfaces to the current Testlyn signal palette.
  */
 
 import {
@@ -38,7 +38,7 @@ export type Product =
 export interface ProductMeta {
   readonly id: Product;
   readonly label: string;
-  /** Frozen hex from CLAUDE.md §4 */
+  /** Product signal color. */
   readonly accent: string;
   readonly icon: ElementType;
   readonly available: boolean;
@@ -48,45 +48,42 @@ export const PRODUCTS: readonly ProductMeta[] = [
   {
     id: "load",
     label: "Load Testing",
-    accent: "#3730A3",
+    accent: "#18F2C3",
     icon: Zap,
     available: true,
   },
   {
     id: "functional",
     label: "Functional",
-    accent: "#8B5CF6",
+    accent: "#7CFFE1",
     icon: FlaskConical,
     available: true,
   },
   {
     id: "a11y",
     label: "Accessibility",
-    accent: "#14B8A6",
+    accent: "#5CFF93",
     icon: Eye,
     available: true,
   },
   {
     id: "synthetic_data",
     label: "Synthetic Data",
-    /** Frozen per CLAUDE.md §4 */
-    accent: "#F59E0B",
+    accent: "#FFD166",
     icon: Database,
     available: true,
   },
   {
     id: "api_contract",
     label: "API Contract",
-    /** Frozen per CLAUDE.md §4 */
-    accent: "#06B6D4",
+    accent: "#3DDCFF",
     icon: GitCompare,
     available: true,
   },
   {
     id: "security",
     label: "Security",
-    /** Frozen per CLAUDE.md §4 */
-    accent: "#DC2626",
+    accent: "#FF4D6D",
     icon: Shield,
     available: true,
   },
@@ -94,49 +91,49 @@ export const PRODUCTS: readonly ProductMeta[] = [
   {
     id: "mobile",
     label: "Mobile",
-    accent: "#6366F1",
+    accent: "#8BB8FF",
     icon: Smartphone,
     available: false,
   },
   {
     id: "visual",
     label: "Visual Regression",
-    accent: "#A855F7",
+    accent: "#D49BFF",
     icon: ScanEye,
     available: false,
   },
   {
     id: "rum",
     label: "Real User Monitoring",
-    accent: "#0EA5E9",
+    accent: "#3DDCFF",
     icon: Users,
     available: false,
   },
   {
     id: "tdm",
     label: "Test Data Management",
-    accent: "#F97316",
+    accent: "#FF9F6E",
     icon: FolderSync,
     available: false,
   },
   {
     id: "qa_maturity",
     label: "QA Maturity",
-    accent: "#22C55E",
+    accent: "#5CFF93",
     icon: ClipboardCheck,
     available: false,
   },
   {
     id: "eng_analytics",
     label: "Engineering Analytics",
-    accent: "#EAB308",
+    accent: "#FFD166",
     icon: BarChart3,
     available: false,
   },
   {
     id: "cicd_insights",
     label: "CI/CD Insights",
-    accent: "#EC4899",
+    accent: "#FF7AB6",
     icon: GitBranch,
     available: false,
   },

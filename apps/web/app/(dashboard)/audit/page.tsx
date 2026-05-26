@@ -52,7 +52,7 @@ function FilterChip({
       className={[
         "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors",
         active
-          ? "bg-indigo-600 text-white"
+          ? "bg-primary text-[#031111]"
           : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200",
       ].join(" ")}
     >
@@ -70,7 +70,7 @@ function ActionBadge({ action }: { action: string }) {
       : action.includes("created") || action.includes("started") || action.includes("invited")
         ? "bg-emerald-500/15 text-emerald-400"
         : action.includes("updated") || action.includes("changed") || action.includes("completed")
-          ? "bg-indigo-500/15 text-indigo-400"
+          ? "bg-primary/15 text-primary"
           : "bg-zinc-500/15 text-zinc-400";
 
   return (
@@ -124,7 +124,7 @@ function AuditRow({ entry }: { entry: AuditLogEntry }) {
                 aria-expanded={expanded}
                 aria-controls={detailRowId}
                 aria-label="Toggle row details"
-                className="flex-shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500"
+                className="flex-shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-primary"
               >
                 <svg
                   className={[
@@ -331,7 +331,7 @@ export default function AuditLogPage() {
               type="datetime-local"
               value={fromDt}
               onChange={(e) => { setFromDt(e.target.value); setCursor(null); }}
-              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </label>
           <label className="flex items-center gap-2 text-sm text-zinc-400">
@@ -340,7 +340,7 @@ export default function AuditLogPage() {
               type="datetime-local"
               value={toDt}
               onChange={(e) => { setToDt(e.target.value); setCursor(null); }}
-              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </label>
           {(actionFilter != null || fromDt || toDt) && (

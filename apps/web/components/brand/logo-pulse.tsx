@@ -1,8 +1,7 @@
 /**
  * LogoPulse — default Testlyn logo.
  *
- * A minimal wordmark with an indigo "pulse" waveform icon to the left.
- * The waveform references load testing + the primary brand color (#3730A3).
+ * A minimal wordmark with a signal waveform icon to the left.
  */
 
 import { type SVGProps } from "react";
@@ -32,11 +31,21 @@ export function LogoPulse({
         {...props}
       >
         {/* Background rounded square */}
-        <rect width="28" height="28" rx="6" fill="#3730A3" />
+        <rect width="28" height="28" rx="8" fill="#061418" />
+        <rect
+          x="0.75"
+          y="0.75"
+          width="26.5"
+          height="26.5"
+          rx="7.25"
+          stroke="#18F2C3"
+          strokeOpacity="0.5"
+          strokeWidth="1.5"
+        />
         {/* Pulse waveform path */}
         <polyline
           points="3,14 7,14 9,8 11,20 13,10 15,18 17,12 19,16 21,14 25,14"
-          stroke="white"
+          stroke="#5CFF93"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"

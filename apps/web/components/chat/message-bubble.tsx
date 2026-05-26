@@ -30,7 +30,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         className={cn(
           "max-w-[85%] rounded-xl px-4 py-3 text-sm leading-relaxed",
           isUser
-            ? "bg-primary text-white"
+            ? "bg-primary text-[#031111]"
             : "border border-zinc-800 bg-zinc-900 text-zinc-100"
         )}
       >

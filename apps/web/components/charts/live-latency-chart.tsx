@@ -63,14 +63,14 @@ export function LiveLatencyChart({
         >
           <defs>
             <linearGradient id="p95Fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3730A3" stopOpacity={0.25} />
-              <stop offset="95%" stopColor="#3730A3" stopOpacity={0} />
+              <stop offset="5%" stopColor="#18F2C3" stopOpacity={0.25} />
+              <stop offset="95%" stopColor="#18F2C3" stopOpacity={0} />
             </linearGradient>
           </defs>
 
           <CartesianGrid
             strokeDasharray="3 3"
-            stroke={isEmpty ? "#27272A30" : "#27272A"}
+            stroke={isEmpty ? "#17323930" : "#173239"}
             vertical={false}
           />
 
@@ -104,8 +104,8 @@ export function LiveLatencyChart({
 
           <Tooltip
             contentStyle={{
-              backgroundColor: "#18181B",
-              border: "1px solid #3F3F46",
+              backgroundColor: "rgba(7, 17, 21, 0.92)",
+              border: "1px solid rgba(24, 242, 195, 0.22)",
               borderRadius: "8px",
               fontSize: 12,
               fontFamily: "JetBrains Mono",
@@ -134,11 +134,11 @@ export function LiveLatencyChart({
             yAxisId="latency"
             type="monotone"
             dataKey="p95"
-            stroke="#3730A3"
+            stroke="#18F2C3"
             strokeWidth={2}
             fill="url(#p95Fill)"
             dot={false}
-            activeDot={{ r: 4, fill: "#3730A3" }}
+            activeDot={{ r: 4, fill: "#18F2C3" }}
             connectNulls
           />
 
@@ -147,7 +147,7 @@ export function LiveLatencyChart({
             yAxisId="right"
             type="monotone"
             dataKey="errorRate"
-            stroke="#EF4444"
+            stroke="#FF4D6D"
             strokeWidth={1.5}
             dot={false}
             activeDot={{ r: 3 }}
@@ -159,7 +159,7 @@ export function LiveLatencyChart({
             yAxisId="right"
             type="monotone"
             dataKey="vus"
-            stroke="#10B981"
+            stroke="#5CFF93"
             strokeWidth={1.5}
             dot={false}
             activeDot={{ r: 3 }}

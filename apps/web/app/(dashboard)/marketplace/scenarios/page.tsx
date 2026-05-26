@@ -98,13 +98,13 @@ const SCENARIOS: ScenarioTemplate[] = [
 function PriceBadge({ priceCents }: { priceCents: number }) {
   if (priceCents === 0) {
     return (
-      <Badge variant="outline" className="text-[#10B981] border-[#10B981]/30 bg-[#10B981]/10">
+      <Badge variant="outline" className="text-[#5CFF93] border-[#5CFF93]/30 bg-[#5CFF93]/10">
         Free
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="text-[#F59E0B] border-[#F59E0B]/30 bg-[#F59E0B]/10">
+    <Badge variant="outline" className="text-[#FFD166] border-[#FFD166]/30 bg-[#FFD166]/10">
       ${(priceCents / 100).toFixed(2)}
     </Badge>
   );
@@ -149,7 +149,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioTemplate }) {
             Coming soon
           </Button>
         ) : (
-          <Button size="sm" className="w-full bg-[#3730A3] hover:bg-[#3730A3]/90 text-white">
+          <Button size="sm" className="w-full bg-[#18F2C3] text-[#031111] hover:bg-[#B9FFF0]">
             Use template
           </Button>
         )}

@@ -17,14 +17,14 @@ export default function TwitterImage() {
           justifyContent: "center",
           width: "100%",
           height: "100%",
-          background: "#0A0A0B",
+          background: "#05090B",
           padding: "72px",
           fontFamily: "sans-serif",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: "36px" }}>
           <svg width="44" height="44" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="6" fill="#3730A3" />
+            <rect width="28" height="28" rx="6" fill="#18F2C3" />
             <polyline
               points="3,14 7,14 9,8 11,20 13,10 15,18 17,12 19,16 21,14 25,14"
               stroke="white"
@@ -57,7 +57,7 @@ export default function TwitterImage() {
           }}
         >
           Load testing that lives{" "}
-          <span style={{ color: "#6366F1" }}>where your code does.</span>
+          <span style={{ color: "#18F2C3" }}>where your code does.</span>
         </div>
 
         <div

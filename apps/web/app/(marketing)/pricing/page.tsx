@@ -232,7 +232,7 @@ export default function PricingPage() {
             }`}
           >
             {tier.highlight && (
-              <span className="mb-2 inline-block self-start rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-white">
+              <span className="mb-2 inline-block self-start rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-[#031111]">
                 Most popular
               </span>
             )}
@@ -262,7 +262,7 @@ export default function PricingPage() {
                   href={tier.href}
                   className={`block w-full rounded-md py-1.5 text-center text-xs font-medium transition-colors ${
                     tier.highlight
-                      ? "bg-primary text-white hover:bg-indigo-800"
+                      ? "bg-primary text-[#031111] hover:bg-primary-100"
                       : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
                   }`}
                 >

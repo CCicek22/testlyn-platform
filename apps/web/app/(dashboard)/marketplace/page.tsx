@@ -90,9 +90,9 @@ const COMMUNITY_PLUGINS: PluginCard[] = [
 // ---------------------------------------------------------------------------
 
 const KIND_BADGE_COLORS: Record<PluginKind, string> = {
-  runner: "bg-[#3730A3]/20 text-[#3730A3] dark:text-indigo-300",
-  integration: "bg-[#10B981]/20 text-[#10B981]",
-  panel: "bg-[#F59E0B]/20 text-[#F59E0B]",
+  runner: "bg-[#18F2C3]/20 text-[#18F2C3] dark:text-primary",
+  integration: "bg-[#5CFF93]/20 text-[#5CFF93]",
+  panel: "bg-[#FFD166]/20 text-[#FFD166]",
 };
 
 function KindBadge({ kind }: { kind: PluginKind }) {
@@ -124,7 +124,7 @@ function PluginGrid({ plugins, title }: { plugins: PluginCard[]; title: string }
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
                   {p.builtin ? (
-                    <span className="text-[#10B981] font-medium">built-in</span>
+                    <span className="text-[#5CFF93] font-medium">built-in</span>
                   ) : (
                     <>{p.installCount.toLocaleString()} installs</>
                   )}

@@ -68,7 +68,7 @@ export default function SecurityRunPage() {
       <div className="flex items-center gap-3">
         <div
           className="h-3 w-3 rounded-full"
-          style={{ backgroundColor: "#DC2626" }}
+          style={{ backgroundColor: "#FF4D6D" }}
           aria-hidden="true"
         />
         <h1 className="text-xl font-bold text-zinc-50">Security Scan</h1>
@@ -99,7 +99,7 @@ export default function SecurityRunPage() {
             </p>
             <p
               className="mt-1 text-3xl font-bold tabular-nums"
-              style={{ color: scan.findings_count > 0 ? "#DC2626" : "#10B981" }}
+              style={{ color: scan.findings_count > 0 ? "#FF4D6D" : "#5CFF93" }}
             >
               {scan.findings_count}
             </p>

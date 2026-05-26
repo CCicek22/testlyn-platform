@@ -8,7 +8,7 @@ import { PRODUCTS, type Product } from "@/lib/products";
 /**
  * Left-sidebar vertical pill list of products.
  *
- * - Sidebar nav stays indigo (#3730A3) — this component only highlights the
+ * - Sidebar nav stays signal-toned (#18F2C3) — this component only highlights the
  *   active product pill with the product accent.
  * - Sets ?product=<id> in the URL query and updates [data-product] on <body>
  *   so the CSS var --accent-current resolves correctly for page header + charts.

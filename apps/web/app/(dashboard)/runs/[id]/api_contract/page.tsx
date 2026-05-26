@@ -57,7 +57,7 @@ export default function ApiContractRunPage() {
       <div className="flex items-center gap-3">
         <div
           className="h-3 w-3 rounded-full"
-          style={{ backgroundColor: "#06B6D4" }}
+          style={{ backgroundColor: "#3DDCFF" }}
           aria-hidden="true"
         />
         <h1 className="text-xl font-bold text-zinc-50">API Contract Scan</h1>
@@ -81,7 +81,7 @@ export default function ApiContractRunPage() {
             <p className="text-xs text-zinc-500 uppercase tracking-wider">Drift Count</p>
             <p
               className="mt-1 text-3xl font-bold tabular-nums"
-              style={{ color: scan.drift_count > 0 ? "#06B6D4" : "#10B981" }}
+              style={{ color: scan.drift_count > 0 ? "#3DDCFF" : "#5CFF93" }}
             >
               {scan.drift_count}
             </p>

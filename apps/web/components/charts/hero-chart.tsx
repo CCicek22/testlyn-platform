@@ -64,7 +64,7 @@ export function HeroChart() {
   const errorPath = toPath(errorPoints, scaleEY);
 
   return (
-    <div className="relative w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#0D0D0F] shadow-2xl">
+    <div className="liquid-glass trace-glow relative w-full rounded-xl">
       {/* Chart header bar */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
         <span className="font-mono text-xs text-zinc-500">
@@ -88,15 +88,15 @@ export function HeroChart() {
         >
           <defs>
             <linearGradient id="heroFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#3730A3" stopOpacity="0.4" />
-              <stop offset="100%" stopColor="#3730A3" stopOpacity="0" />
+              <stop offset="0%" stopColor="#18F2C3" stopOpacity="0.36" />
+              <stop offset="100%" stopColor="#18F2C3" stopOpacity="0" />
             </linearGradient>
             {/* Subtle grid */}
             <pattern id="grid" width="90" height="60" patternUnits="userSpaceOnUse">
               <path
                 d={`M ${W} 0 L 0 0 0 ${H}`}
                 fill="none"
-                stroke="#27272A"
+                stroke="#173239"
                 strokeWidth="0.5"
               />
             </pattern>
@@ -111,7 +111,7 @@ export function HeroChart() {
           <path
             d={latencyPath}
             fill="none"
-            stroke="#3730A3"
+            stroke="#18F2C3"
             strokeWidth="2.5"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -121,7 +121,7 @@ export function HeroChart() {
           <path
             d={errorPath}
             fill="none"
-            stroke="#EF4444"
+            stroke="#FF4D6D"
             strokeWidth="1.5"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -130,13 +130,13 @@ export function HeroChart() {
 
           {/* Annotations */}
           {/* Peak marker */}
-          <circle cx="360" cy={scaleY(340)} r="5" fill="#3730A3" opacity="0.9" />
+          <circle cx="360" cy={scaleY(340)} r="5" fill="#18F2C3" opacity="0.95" />
           <line
             x1="360"
             y1={scaleY(340) - 6}
             x2="360"
             y2={scaleY(340) - 40}
-            stroke="#3730A3"
+            stroke="#18F2C3"
             strokeWidth="1"
             strokeDasharray="3 2"
           />
@@ -146,14 +146,14 @@ export function HeroChart() {
             width="220"
             height="20"
             rx="4"
-            fill="#1E1B4B"
+            fill="#071E22"
             opacity="0.9"
           />
           <text
             x="360"
             y={scaleY(340) - 44}
             textAnchor="middle"
-            fill="#A5B4FC"
+            fill="#B9FFF0"
             fontSize="10"
             fontFamily="JetBrains Mono, monospace"
           >
@@ -167,7 +167,7 @@ export function HeroChart() {
         <span className="flex items-center gap-1.5 font-mono text-xs text-zinc-400">
           <span
             className="inline-block h-0.5 w-4"
-            style={{ backgroundColor: "#3730A3" }}
+            style={{ backgroundColor: "#18F2C3" }}
           />
           p95 latency
         </span>
@@ -175,8 +175,8 @@ export function HeroChart() {
           <span
             className="inline-block h-0.5 w-4"
             style={{
-              backgroundColor: "#EF4444",
-              borderTop: "1.5px dashed #EF4444",
+              backgroundColor: "#FF4D6D",
+              borderTop: "1.5px dashed #FF4D6D",
             }}
           />
           error rate

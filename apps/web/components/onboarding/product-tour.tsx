@@ -204,7 +204,7 @@ export function ProductTour({ product: _product = "load" }: ProductTourProps) {
             <button
               onClick={handleNext}
               className={cn(
-                "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white",
+                "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-[#031111]",
                 "transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               )}
             >

@@ -48,7 +48,7 @@ export default function SyntheticDataRunPage() {
       <div className="flex items-center gap-3">
         <div
           className="h-3 w-3 rounded-full"
-          style={{ backgroundColor: "#F59E0B" }}
+          style={{ backgroundColor: "#FFD166" }}
           aria-hidden="true"
         />
         <h1 className="text-xl font-bold text-zinc-50">Synthetic Data Job</h1>

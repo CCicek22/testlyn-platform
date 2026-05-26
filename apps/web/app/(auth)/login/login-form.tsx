@@ -54,7 +54,7 @@ export function LoginForm() {
 
   if (DEV_BYPASS) {
     return (
-      <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="liquid-glass rounded-xl p-6">
         <div className="mb-4 rounded-md bg-primary/5 px-3 py-2 text-xs text-primary">
           DEV_AUTH_BYPASS is enabled. No Firebase credentials required.
         </div>
@@ -70,7 +70,7 @@ export function LoginForm() {
   }
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+    <div className="liquid-glass rounded-xl p-6">
       {error && (
         <div
           role="alert"

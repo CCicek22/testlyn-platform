@@ -16,7 +16,7 @@ import type { MeResponse } from "@testlyn/shared";
 const STATUS_COLORS: Record<string, string> = {
   completed: "bg-emerald-500/15 text-emerald-400",
   pending: "bg-zinc-500/15 text-zinc-400",
-  delivering: "bg-indigo-500/15 text-indigo-400",
+  delivering: "bg-primary/15 text-primary",
   failed: "bg-amber-500/15 text-amber-400",
   abandoned: "bg-red-500/15 text-red-400",
 };
@@ -82,7 +82,7 @@ function CreateEndpointModal({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://your-server.com/webhook"
-          className="mb-4 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none"
+          className="mb-4 w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-primary focus:outline-none"
         />
 
         <p className="mb-2 text-sm font-medium text-zinc-300">Events</p>
@@ -93,7 +93,7 @@ function CreateEndpointModal({
                 type="checkbox"
                 checked={selectedEvents.includes(ev)}
                 onChange={() => toggle(ev)}
-                className="accent-indigo-500"
+                className="accent-primary"
               />
               {ev}
             </label>
@@ -116,7 +116,7 @@ function CreateEndpointModal({
           <button
             onClick={() => create.mutate({ url, events: selectedEvents })}
             disabled={!url || selectedEvents.length === 0 || create.isPending}
-            className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+            className="rounded bg-primary px-4 py-2 text-sm font-medium text-[#031111] hover:bg-primary-100 disabled:opacity-40"
           >
             {create.isPending ? "Creating…" : "Create"}
           </button>
@@ -181,7 +181,7 @@ function DeliveryLog({ endpointId }: { endpointId: string }) {
                 <button
                   onClick={() => replay.mutate(d.id)}
                   disabled={replay.isPending}
-                  className="rounded px-2 py-1 text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-40"
+                  className="rounded px-2 py-1 text-xs text-primary hover:text-primary disabled:opacity-40"
                 >
                   Replay
                 </button>
@@ -251,7 +251,7 @@ function EndpointCard({
 
       <button
         onClick={() => setShowLog((v) => !v)}
-        className="mt-3 text-xs text-indigo-400 hover:text-indigo-300"
+        className="mt-3 text-xs text-primary hover:text-primary"
       >
         {showLog ? "Hide delivery log" : "Show delivery log"}
       </button>
@@ -292,7 +292,7 @@ export default function WebhooksPage() {
       <div className="flex flex-col min-h-full">
         <div
           className="border-b border-zinc-800 px-6 py-4"
-          style={{ borderTopColor: "#3730A3", borderTopWidth: 3 }}
+          style={{ borderTopColor: "#18F2C3", borderTopWidth: 3 }}
         >
           <h1 className="text-lg font-bold tracking-tight text-zinc-100">
             Webhooks
@@ -312,7 +312,7 @@ export default function WebhooksPage() {
       {/* Page header */}
       <div
         className="border-b border-zinc-800 px-6 py-4"
-        style={{ borderTopColor: "#3730A3", borderTopWidth: 3 }}
+        style={{ borderTopColor: "#18F2C3", borderTopWidth: 3 }}
       >
         <div className="flex items-center justify-between">
           <div>
@@ -326,7 +326,7 @@ export default function WebhooksPage() {
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            className="rounded bg-primary px-4 py-2 text-sm font-medium text-[#031111] hover:bg-primary-100"
           >
             Add endpoint
           </button>
@@ -344,7 +344,7 @@ export default function WebhooksPage() {
             <p className="text-sm text-zinc-500">No webhook endpoints yet.</p>
             <button
               onClick={() => setShowModal(true)}
-              className="mt-3 text-sm text-indigo-400 hover:text-indigo-300"
+              className="mt-3 text-sm text-primary hover:text-primary"
             >
               Add your first endpoint →
             </button>

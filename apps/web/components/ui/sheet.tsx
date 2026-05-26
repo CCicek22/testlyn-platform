@@ -41,8 +41,7 @@ export const SheetContent = React.forwardRef<
     <SheetPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed z-50 gap-4 bg-white p-6 shadow-xl transition ease-in-out",
-        "dark:bg-zinc-900",
+        "liquid-glass fixed z-50 gap-4 p-6 text-[var(--glass-ink)] transition ease-in-out",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         side === "right" &&
           "inset-y-0 right-0 h-full w-3/4 sm:max-w-sm data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
@@ -67,5 +66,5 @@ export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDi
 }
 
 export function SheetTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <SheetPrimitive.Title className={cn("text-lg font-semibold text-zinc-950 dark:text-zinc-50", className)} {...props} />;
+  return <SheetPrimitive.Title className={cn("text-lg font-semibold text-[var(--glass-ink)]", className)} {...props} />;
 }

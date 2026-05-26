@@ -86,10 +86,10 @@ function SidebarLink({
     <Link
       href={href}
       className={cn(
-        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-all duration-200",
         active
-          ? "bg-primary/10 text-primary"
-          : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          ? "trace-glow bg-primary/15 text-primary"
+          : "text-zinc-400 hover:bg-primary/10 hover:text-zinc-100"
       )}
       aria-current={active ? "page" : undefined}
     >
@@ -105,7 +105,7 @@ function CmdKHint({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-400"
+      className="flex w-full items-center gap-2 rounded-md border border-zinc-800 bg-white/5 px-3 py-1.5 text-xs text-zinc-500 backdrop-blur-xl transition-colors hover:bg-primary/10 hover:text-primary"
       aria-label="Open command palette"
     >
       <svg
@@ -140,7 +140,7 @@ function SidebarModeToggle({
     <button
       onClick={onToggle}
       title={compact ? "Switch to list view" : "Switch to compact grid"}
-      className="flex items-center justify-center rounded-md p-1 text-zinc-600 transition-colors hover:bg-zinc-800 hover:text-zinc-400"
+      className="flex items-center justify-center rounded-md p-1 text-zinc-600 transition-colors hover:bg-primary/10 hover:text-primary"
       aria-label={compact ? "Switch to list view" : "Switch to compact grid"}
     >
       {compact ? (
@@ -285,7 +285,7 @@ export default function DashboardShell({
       <ProductTour product={safeProduct} />
 
       {/* Sidebar */}
-      <aside className="hidden w-56 flex-shrink-0 flex-col border-r border-zinc-800 bg-zinc-950 lg:flex">
+      <aside className="hidden w-56 flex-shrink-0 flex-col border-r border-zinc-800 bg-zinc-950/80 backdrop-blur-2xl lg:flex">
         <div className="flex h-14 items-center border-b border-zinc-800 px-4">
           <Link href="/projects" aria-label="Testlyn home">
             <LogoPulse size={22} />
@@ -332,12 +332,12 @@ export default function DashboardShell({
           <div className="relative">
             <button
               onClick={() => setMenuOpen((o) => !o)}
-              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              className="flex w-full items-center gap-2.5 rounded-md border border-transparent px-3 py-2 text-sm text-zinc-400 transition-colors hover:border-primary/20 hover:bg-primary/10 hover:text-zinc-100"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
             >
               <span
-                className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary"
+                className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/15 text-xs font-semibold text-primary"
                 aria-hidden="true"
               >
                 {user?.email?.[0]?.toUpperCase() ?? "U"}
@@ -359,11 +359,11 @@ export default function DashboardShell({
 
             {menuOpen && (
               <div
-                className="absolute bottom-full left-0 mb-1 w-full rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
+                className="liquid-glass absolute bottom-full left-0 mb-1 w-full rounded-md py-1"
                 role="menu"
               >
                 <button
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-400 hover:bg-primary/10 hover:text-zinc-100"
                   onClick={handleSignOut}
                   role="menuitem"
                 >
@@ -388,7 +388,7 @@ export default function DashboardShell({
       {/* Main */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Mobile header */}
-        <header className="flex h-14 items-center border-b border-zinc-800 px-4 lg:hidden">
+        <header className="flex h-14 items-center border-b border-zinc-800 bg-zinc-950/70 px-4 backdrop-blur-2xl lg:hidden">
           <Link href="/projects" aria-label="Testlyn home">
             <LogoPulse size={20} wordmark={false} />
           </Link>
@@ -397,7 +397,7 @@ export default function DashboardShell({
           </span>
         </header>
 
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto bg-[radial-gradient(circle_at_85%_8%,rgba(24,242,195,0.10),transparent_28rem)]">{children}</main>
       </div>
     </div>
   );
