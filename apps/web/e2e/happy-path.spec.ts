@@ -75,7 +75,7 @@ test.describe("Happy path — dev-bypass login to live chart", () => {
       await skipTourProjects.waitFor({ state: "visible", timeout: 3000 });
       await skipTourProjects.click();
       console.log("Successfully dismissed Product tour modal on Projects dashboard.");
-    } catch (e) {
+    } catch {
       console.log("Product tour modal did not appear on Projects dashboard.");
     }
 
@@ -106,7 +106,7 @@ test.describe("Happy path — dev-bypass login to live chart", () => {
       await skipTour.waitFor({ state: "visible", timeout: 2000 });
       await skipTour.click();
       console.log("Successfully dismissed Product tour modal on project details page.");
-    } catch (e) {
+    } catch {
       console.log("Product tour modal did not appear on project details page.");
     }
 

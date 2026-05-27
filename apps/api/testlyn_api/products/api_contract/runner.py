@@ -107,7 +107,6 @@ class ApiContractRunner:
             )
 
         import os
-        import tempfile
         import httpx
         from testlyn_api.core.url_safety import assert_safe_url
 

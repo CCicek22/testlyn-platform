@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from typing import Any
@@ -30,8 +31,6 @@ def _cache_key(namespace: str, payload: str) -> str:
     digest = hashlib.sha256(payload.encode()).hexdigest()
     return f"gemini:{namespace}:{digest}"
 
-
-import asyncio
 
 _initialized = False
 _credentials = None

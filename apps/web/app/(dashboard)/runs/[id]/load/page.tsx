@@ -200,7 +200,7 @@ export default function LoadRunPage() {
           <LiveLatencyChart samples={samples} windowSize={60} />
         </div>
 
-        {(effectiveState === "done" || effectiveState === "completed" || effectiveState === "error" || effectiveState === "failed" || effectiveState === "cancelled") && samples.length > 0 && (
+        {(effectiveState === "done" || effectiveState === "error" || effectiveState === "cancelled") && samples.length > 0 && (
           <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
             <h2 className="mb-3 text-sm font-medium text-zinc-300">Run summary</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

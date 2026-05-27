@@ -22,6 +22,13 @@ export default [
     },
   },
   {
-    ignores: [".next/**", "node_modules/**"],
+    ignores: [".next/**", "node_modules/**", "components/zzz_old/**"],
+  },
+  {
+    files: ["e2e/**/*.ts"],
+    rules: {
+      "no-console": "off",
+      "@typescript-eslint/no-explicit-any": "off",
+    },
   },
 ];
