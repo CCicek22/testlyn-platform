@@ -49,13 +49,18 @@ def _user_uuid(uid: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_URL, uid)
 
 
+class OrgContextError(Exception):
+    """Raised when organization context cannot be resolved due to DB errors."""
+    pass
+
+
 async def resolve_org_and_plan(uid: str) -> tuple[str | None, str]:
     """Return ``(org_id_str_or_None, plan)`` for a Firebase ``uid``.
 
     Picks a deterministic primary org (earliest membership) when the user
     belongs to several. Returns ``(None, "free")`` when the user has no
-    membership or on any DB error (fail-open to free tier; the request is still
-    authenticated by the auth dependency downstream).
+    membership (valid DB lookup returning None). Raises ``OrgContextError``
+    on any DB error to let allowlist middleware fail closed defensively.
     Cached per uid for ``_CACHE_TTL`` seconds.
     """
     now = time.monotonic()
@@ -83,18 +88,14 @@ async def resolve_org_and_plan(uid: str) -> tuple[str | None, str]:
             ).first()
         if row is not None:
             result = (str(row[0]), row[1])
-    except Exception as exc:  # noqa: BLE001 — never break the request on resolver error
-        # error (not warning): on a DB error we return (None, "free"), which
-        # fails OPEN — the request keeps its free-tier limit and, critically,
-        # any per-org IP allowlist is silently skipped (the allowlist middleware
-        # can't key on an org it couldn't resolve). Fail-open favors availability
-        # over strictness for a Postgres blip; log it loudly so the bypass is
-        # observable. Flipping the allowlist to fail-closed is an operator call.
+    except Exception as exc:  # noqa: BLE001
+        # Log DB errors loudly and raise OrgContextError so allowlist fails closed.
         log.error("org_context.resolve_failed", uid=uid, exc=str(exc))
-        result = (None, "free")
+        raise OrgContextError(str(exc)) from exc
 
     _cache[uid] = (result, now + _CACHE_TTL)
     return result
+
 
 
 def invalidate(uid: str) -> None:

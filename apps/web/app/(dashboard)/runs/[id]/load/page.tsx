@@ -21,16 +21,18 @@ import type { TestRun, LiveSample, SSEEventPayload, RunState } from "@testlyn/sh
 const PRODUCT = "load";
 const ACCENT = getProduct(PRODUCT).accent;
 
-const STATE_CONFIG: Record<RunState, { label: string; color: string; dotColor: string }> = {
+const STATE_CONFIG: Record<string, { label: string; color: string; dotColor: string }> = {
   queued:    { label: "Queued",    color: "border-zinc-700 bg-zinc-800 text-zinc-400",      dotColor: "bg-zinc-500" },
   running:   { label: "Running",  color: "border-primary/30 bg-primary/10 text-primary",    dotColor: "bg-primary animate-pulse" },
-  done:      { label: "Done",     color: "border-success/30 bg-success/10 text-success",    dotColor: "bg-success" },
-  error:     { label: "Error",    color: "border-alert/30 bg-alert/10 text-alert",          dotColor: "bg-alert" },
+  done:      { label: "Completed", color: "border-success/30 bg-success/10 text-success",    dotColor: "bg-success" },
+  completed: { label: "Completed", color: "border-success/30 bg-success/10 text-success",    dotColor: "bg-success" },
+  error:     { label: "Failed",    color: "border-alert/30 bg-alert/10 text-alert",          dotColor: "bg-alert" },
+  failed:    { label: "Failed",    color: "border-alert/30 bg-alert/10 text-alert",          dotColor: "bg-alert" },
   cancelled: { label: "Cancelled", color: "border-zinc-700 bg-zinc-800 text-zinc-400",     dotColor: "bg-zinc-500" },
 };
 
-function RunStateBadge({ state }: { state: RunState }) {
-  const cfg = STATE_CONFIG[state];
+function RunStateBadge({ state }: { state: string }) {
+  const cfg = STATE_CONFIG[state] ?? STATE_CONFIG["queued"]!;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.color}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${cfg.dotColor}`} aria-hidden="true" />
@@ -198,7 +200,7 @@ export default function LoadRunPage() {
           <LiveLatencyChart samples={samples} windowSize={60} />
         </div>
 
-        {(effectiveState === "done" || effectiveState === "error" || effectiveState === "cancelled") && samples.length > 0 && (
+        {(effectiveState === "done" || effectiveState === "completed" || effectiveState === "error" || effectiveState === "failed" || effectiveState === "cancelled") && samples.length > 0 && (
           <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
             <h2 className="mb-3 text-sm font-medium text-zinc-300">Run summary</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

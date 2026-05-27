@@ -241,7 +241,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
           instead of the free 60.
         - Fallback → remote IP, free tier.
         """
-        from testlyn_api.core.org_context import resolve_org_and_plan
+        from testlyn_api.core.org_context import OrgContextError, resolve_org_and_plan
         from testlyn_api.core.token_verify import extract_bearer, verify_token
 
         # --- X-Api-Key ---
@@ -260,9 +260,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 uid = claims.get("uid") or claims.get("user_id") or claims.get("sub")
                 if uid:
                     # Cached DB lookup — one hit per user per TTL, not per request.
-                    org_id, plan = await resolve_org_and_plan(str(uid))
-                    if org_id is not None:
-                        return org_id, plan
+                    try:
+                        org_id, plan = await resolve_org_and_plan(str(uid))
+                        if org_id is not None:
+                            return org_id, plan
+                    except OrgContextError:
+                        # Fail-open to "free" tier during database outages to preserve availability.
+                        # Relies on downstream authentication middleware to enforce strict access rules.
+                        pass
 
         # --- Fallback: IP-based ---
         client_ip = (request.client.host if request.client else "unknown")
