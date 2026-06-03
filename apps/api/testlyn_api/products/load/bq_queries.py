@@ -50,6 +50,12 @@ ORDER BY ts ASC
 """
 
 
+# Hard cap on rows returned by the /samples endpoint: 86400 = 24h of 1s
+# buckets. A multi-hour run could otherwise stream tens of thousands of rows.
+# Capping to the FIRST N seconds (ORDER BY ts ASC + LIMIT) keeps the chart's
+# leading window intact rather than truncating an arbitrary middle slice.
+MAX_SAMPLE_ROWS = 86_400
+
 _RUN_SAMPLES_SQL = """
 SELECT
   TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
@@ -66,6 +72,7 @@ FROM `{project}.{dataset}.samples_1s`
 WHERE run_id = @run_id
 GROUP BY ts
 ORDER BY ts ASC
+LIMIT {max_rows}
 """
 
 
@@ -89,7 +96,7 @@ async def fetch_run_samples(
 
     client = _get_client(project)
 
-    sql = _RUN_SAMPLES_SQL.format(project=project, dataset=dataset)
+    sql = _RUN_SAMPLES_SQL.format(project=project, dataset=dataset, max_rows=MAX_SAMPLE_ROWS)
 
     job_config = bigquery.QueryJobConfig(
         query_parameters=[

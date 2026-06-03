@@ -446,7 +446,7 @@ async def test_create_sink_invalid_kind(
 @pytest.mark.asyncio
 async def test_export_event_formats_splunk(db_session: AsyncSession) -> None:
     """_fmt_splunk produces expected keys."""
-    from testlyn_api.services.audit_siem import _fmt_splunk
+    from testlyn_api.services.audit_siem import _event_dict, _fmt_splunk
 
     org = Organization(name="SiemOrg", slug=f"siem-{uuid.uuid4().hex[:6]}")
     db_session.add(org)
@@ -462,7 +462,7 @@ async def test_export_event_formats_splunk(db_session: AsyncSession) -> None:
     db_session.add(event)
     await db_session.flush()
 
-    payload = _fmt_splunk(event)
+    payload = _fmt_splunk(_event_dict(event))
     assert payload["sourcetype"] == "testlyn:audit"
     assert "event" in payload
     assert payload["event"]["action"] == "test.created"
@@ -470,7 +470,7 @@ async def test_export_event_formats_splunk(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_export_event_formats_datadog(db_session: AsyncSession) -> None:
-    from testlyn_api.services.audit_siem import _fmt_datadog
+    from testlyn_api.services.audit_siem import _event_dict, _fmt_datadog
 
     org = Organization(name="DdOrg", slug=f"dd-{uuid.uuid4().hex[:6]}")
     db_session.add(org)
@@ -484,7 +484,7 @@ async def test_export_event_formats_datadog(db_session: AsyncSession) -> None:
     db_session.add(event)
     await db_session.flush()
 
-    payload = _fmt_datadog(event)
+    payload = _fmt_datadog(_event_dict(event))
     assert payload["ddsource"] == "testlyn"
     assert "action:test.deleted" in payload["ddtags"]
     assert "message" in payload
@@ -495,7 +495,7 @@ async def test_export_event_skips_when_no_url(
     db_session: AsyncSession, monkeypatch
 ) -> None:
     """export_event with no url in config logs warning and returns without error."""
-    from testlyn_api.services.audit_siem import export_event
+    from testlyn_api.services.audit_siem import _event_dict, export_event
 
     org = Organization(name="NoUrlOrg", slug=f"nourl-{uuid.uuid4().hex[:6]}")
     db_session.add(org)
@@ -519,7 +519,7 @@ async def test_export_event_skips_when_no_url(
     await db_session.flush()
 
     # Should not raise even without a URL
-    await export_event(sink, event)
+    await export_event(sink, _event_dict(event))
 
 
 @pytest.mark.asyncio
@@ -532,7 +532,7 @@ async def test_backfill_recent_returns_count(
     exported: list[str] = []
 
     async def _mock_export(sink, event):  # type: ignore[no-untyped-def]
-        exported.append(str(event.id))
+        exported.append(str(event["id"]))
 
     monkeypatch.setattr("testlyn_api.services.audit_siem.export_event", _mock_export)
 

@@ -30,6 +30,20 @@ async def _seed_run(session: AsyncSession, *, org_id: uuid.UUID = _DEV_ORG_ID) -
     return run_id
 
 
+def test_run_samples_sql_has_row_cap() -> None:
+    """The /samples query must cap rows so a multi-hour run can't dump tens of
+    thousands of per-second rows."""
+    from testlyn_api.products.load import bq_queries
+
+    sql = bq_queries._RUN_SAMPLES_SQL.format(
+        project="p", dataset="d", max_rows=bq_queries.MAX_SAMPLE_ROWS
+    )
+    assert f"LIMIT {bq_queries.MAX_SAMPLE_ROWS}" in sql
+    assert bq_queries.MAX_SAMPLE_ROWS == 86_400
+    # Cap keeps the leading window (ORDER BY ts ASC then LIMIT).
+    assert sql.index("ORDER BY ts ASC") < sql.index("LIMIT")
+
+
 @pytest.mark.asyncio
 async def test_samples_404_unknown_run(client: AsyncClient) -> None:
     resp = await client.get(f"/v1/runs/{uuid.uuid4()}/samples")

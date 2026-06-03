@@ -31,29 +31,37 @@ _MAX_RETRIES = 3
 # ── Formatters ────────────────────────────────────────────────────────────────
 
 
-def _fmt_splunk(event: AuditLog) -> dict[str, Any]:
+def _fmt_splunk(event: dict[str, Any]) -> dict[str, Any]:
+    created_at = event.get("created_at")
     return {
-        "time": event.created_at.timestamp() if event.created_at else None,
+        "time": datetime.fromisoformat(created_at).timestamp() if created_at else None,
         "sourcetype": "testlyn:audit",
-        "event": _event_dict(event),
+        "event": event,
     }
 
 
-def _fmt_datadog(event: AuditLog) -> dict[str, Any]:
+def _fmt_datadog(event: dict[str, Any]) -> dict[str, Any]:
     return {
         "ddsource": "testlyn",
-        "ddtags": f"org_id:{event.org_id},action:{event.action}",
+        "ddtags": f"org_id:{event['org_id']},action:{event['action']}",
         "service": "testlyn-api",
-        "message": json.dumps(_event_dict(event)),
-        "date": event.created_at.isoformat() if event.created_at else None,
+        "message": json.dumps(event),
+        "date": event.get("created_at"),
     }
 
 
-def _fmt_generic(event: AuditLog) -> dict[str, Any]:
-    return _event_dict(event)
+def _fmt_generic(event: dict[str, Any]) -> dict[str, Any]:
+    return event
 
 
 def _event_dict(event: AuditLog) -> dict[str, Any]:
+    """Build a plain serialisable event dict from an ORM row.
+
+    MUST be called while ``event`` is still attached to a live, flushed
+    AsyncSession — ``id`` and ``created_at`` (a server_default) are only
+    populated after flush, and any attribute access on a detached/closed
+    session would trigger a lazy refresh and fail under asyncio.
+    """
     return {
         "id": str(event.id),
         "org_id": str(event.org_id),
@@ -121,7 +129,7 @@ async def active_sinks_for_org(
     return list(result.scalars().all())
 
 
-async def _dispatch_safely(sink: AuditSiemSink, event: AuditLog) -> None:
+async def _dispatch_safely(sink: AuditSiemSink, event: dict[str, Any]) -> None:
     """Run export_event, isolating any failure so it cannot propagate."""
     try:
         await export_event(sink, event)
@@ -129,16 +137,21 @@ async def _dispatch_safely(sink: AuditSiemSink, event: AuditLog) -> None:
         log.error(
             "audit_siem.dispatch_failed",
             sink_id=str(sink.id),
-            event_id=str(event.id),
+            event_id=event.get("id"),
             error=str(exc),
         )
 
 
 def dispatch_event_background(
     sinks: list[AuditSiemSink],
-    event: AuditLog,
+    event: dict[str, Any],
 ) -> None:
-    """Fire-and-forget delivery of one audit event to each active sink.
+    """Fire-and-forget delivery of one pre-built audit event to each active sink.
+
+    ``event`` is a plain serialisable dict built ON-session via ``_event_dict``
+    BEFORE the request's AsyncSession commits/closes — no ORM object is touched
+    here, so the detached tasks never trigger a lazy refresh on a closed session
+    (which previously failed silently and dropped every event).
 
     Each delivery runs in its own detached task so a slow or failing SIEM
     endpoint never blocks the request hot-path or breaks a sibling sink.
@@ -154,8 +167,8 @@ def dispatch_event_background(
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
-async def export_event(sink: AuditSiemSink, event: AuditLog) -> None:
-    """Format and POST a single audit event to the given sink."""
+async def export_event(sink: AuditSiemSink, event: dict[str, Any]) -> None:
+    """Format and POST a single pre-built audit event (dict) to the given sink."""
     config: dict[str, Any] = sink.config or {}
     url: str = config.get("url", "")
 
@@ -180,7 +193,7 @@ async def export_event(sink: AuditSiemSink, event: AuditLog) -> None:
             headers["Authorization"] = f"Bearer {bearer}"
 
     await _post_with_retry(url, headers, payload)
-    log.info("audit_siem.exported", sink_id=str(sink.id), event_id=str(event.id))
+    log.info("audit_siem.exported", sink_id=str(sink.id), event_id=event.get("id"))
 
 
 async def backfill_recent(
@@ -199,7 +212,9 @@ async def backfill_recent(
         .order_by(AuditLog.created_at.asc())
     )
     events = result.scalars().all()
-    for event in events:
-        await export_event(sink, event)
+    # Build serialisable dicts while rows are still attached to the session.
+    payloads = [_event_dict(event) for event in events]
+    for payload in payloads:
+        await export_event(sink, payload)
     log.info("audit_siem.backfill_done", sink_id=str(sink.id), count=len(events))
     return len(events)
