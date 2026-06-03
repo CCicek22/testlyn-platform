@@ -8,7 +8,14 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from report_builder.pdf import PdfResult, _chart_error_rate, _chart_latency, _chart_vus, build_pdf
+from report_builder.pdf import (
+    PdfResult,
+    _chart_error_rate,
+    _chart_latency,
+    _chart_vus,
+    _count_pdf_pages,
+    build_pdf,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -58,6 +65,30 @@ def test_chart_latency_single_point():
     """Single-point window must not crash."""
     b64 = _chart_latency([{"t": 0, "p50": 50, "p95": 90, "p99": 120, "error_rate": 0, "vus": 5}])
     assert len(b64) > 50
+
+
+# ---------------------------------------------------------------------------
+# _count_pdf_pages
+# ---------------------------------------------------------------------------
+
+
+def test_count_pdf_pages_counts_page_objects_not_page_tree():
+    """Each `/Type /Page` leaf counts; the `/Type /Pages` tree node must not.
+
+    Also: markers are not reliably newline-delimited in real PDF output, so a
+    space- or bracket-terminated marker must still count.
+    """
+    pdf = (
+        b"1 0 obj << /Type /Pages /Count 3 >> endobj\n"
+        b"2 0 obj << /Type /Page /Parent 1 0 R >> endobj\n"
+        b"3 0 obj << /Type /Page/Parent 1 0 R >> endobj\n"
+        b"4 0 obj <</Type/Page /Parent 1 0 R>> endobj\n"
+    )
+    assert _count_pdf_pages(pdf) == 3
+
+
+def test_count_pdf_pages_floor_is_one():
+    assert _count_pdf_pages(b"no markers here") == 1
 
 
 # ---------------------------------------------------------------------------

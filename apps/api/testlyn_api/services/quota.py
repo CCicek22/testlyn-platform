@@ -146,3 +146,25 @@ class QuotaService:
             runs_count=record.runs_count,
             month=month,
         )
+
+    async def release_usage(self, org: Organization, test_run: TestRun) -> None:
+        """Reverse a previously recorded run when it never actually ran.
+
+        Called when a run ends in failed-on-launch or cancelled state so the
+        org's monthly usage isn't inflated (which would wrongly trip
+        check_can_run). Idempotent: floors at 0 and never goes negative, so
+        calling it twice for the same run is harmless.
+        """
+        month = _current_month()
+        record = await self._get_or_create_usage(org.id, month)
+        if record.runs_count <= 0:
+            return
+        record.runs_count -= 1
+        await self._session.flush()
+        log.info(
+            "quota.usage_released",
+            org_id=str(org.id),
+            run_id=str(test_run.id),
+            runs_count=record.runs_count,
+            month=month,
+        )

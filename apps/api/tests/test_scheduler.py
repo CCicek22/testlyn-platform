@@ -96,6 +96,40 @@ class TestLocalMode:
         assert handles == []
 
 
+class TestCloudTarget:
+    """Cloud-mode create_schedule must point at the internal endpoint and carry
+    the X-Internal-Token header, otherwise every scheduled trigger 401s."""
+
+    async def test_target_uses_internal_path_and_token_header(self, monkeypatch):
+        from testlyn_api.services import scheduler
+
+        captured: dict = {}
+
+        class _FakeClient:
+            async def create_job(self, *, request):
+                captured["job"] = request.job
+
+        async def _fake_try(*args, **kwargs):
+            return _FakeClient()
+
+        monkeypatch.setattr(scheduler, "_try_cloud_scheduler", _fake_try)
+
+        from testlyn_api.config import get_settings
+
+        cloud = get_settings().model_copy(update={"internal_token": "tok-123"})
+        monkeypatch.setattr(scheduler, "get_settings", lambda: cloud)
+
+        test_id = str(uuid.uuid4())
+        handle = await scheduler.create_schedule(
+            test_id=test_id, cron="0 * * * *", tz="UTC", org_id="org-x"
+        )
+
+        assert handle.local is False
+        job = captured["job"]
+        assert job.http_target.uri.endswith(f"/v1/internal/tests/{test_id}/runs")
+        assert job.http_target.headers["X-Internal-Token"] == "tok-123"
+
+
 class TestCronValidation:
     """Validates cron expressions in the schedules router."""
 

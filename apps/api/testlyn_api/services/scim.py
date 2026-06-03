@@ -34,6 +34,14 @@ SCIM_LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 
 
+class ScimConflict(Exception):
+    """Raised when a SCIM create targets an already-existing resource.
+
+    RFC 7644 §3.3: POST to /Users with a userName that already exists (and is
+    already a member of the org) must return 409 Conflict, not 201.
+    """
+
+
 def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
 
@@ -43,8 +51,15 @@ def _now_iso() -> str:
 # ---------------------------------------------------------------------------
 
 
-def user_to_scim(user: User, org_id: uuid.UUID, base_url: str) -> dict[str, Any]:
-    """Convert a User ORM row to a SCIM User resource dict."""
+def user_to_scim(
+    user: User, org_id: uuid.UUID, base_url: str, *, active: bool = True
+) -> dict[str, Any]:
+    """Convert a User ORM row to a SCIM User resource dict.
+
+    ``active`` reflects whether the user still has membership in ``org_id``.
+    Callers must pass ``active=False`` after a deactivation so the IdP does not
+    treat the user as active and trigger a reactivation loop (RFC 7644).
+    """
     location = f"{base_url}/v2/scim/{org_id}/Users/{user.id}"
     return {
         "schemas": [SCIM_USER_SCHEMA],
@@ -57,7 +72,7 @@ def user_to_scim(user: User, org_id: uuid.UUID, base_url: str) -> dict[str, Any]
             "familyName": "",
         },
         "emails": [{"value": user.email, "primary": True}],
-        "active": True,
+        "active": active,
         "meta": {
             "resourceType": "User",
             "created": user.created_at.isoformat() if user.created_at else _now_iso(),
@@ -127,7 +142,9 @@ async def scim_list_users(
         "schemas": [SCIM_LIST_SCHEMA],
         "totalResults": total,
         "startIndex": start_index,
-        "itemsPerPage": count,
+        # RFC 7644: itemsPerPage is the count of resources actually returned in
+        # this page, not the requested page size.
+        "itemsPerPage": len(resources),
         "Resources": resources,
     }
 
@@ -166,19 +183,24 @@ async def scim_create_user(
     name = (payload.get("name") or {}).get("formatted") or payload.get("displayName")
     external_id = payload.get("externalId")
 
-    # Idempotent: return existing user if email already exists
     existing = await session.execute(select(User).where(User.email == email))
     user = existing.scalar_one_or_none()
-    if user is None:
+    if user is not None:
+        # User already exists; if already a member of this org the resource
+        # already exists → 409 Conflict (RFC 7644 §3.3). If the user exists but
+        # is not yet a member, this is a (re)provision → add membership.
+        member_check = await session.execute(
+            select(OrgMember).where(
+                OrgMember.org_id == org_id, OrgMember.user_id == user.id
+            )
+        )
+        if member_check.scalar_one_or_none() is not None:
+            raise ScimConflict(f"User {email} already exists in org")
+        session.add(OrgMember(org_id=org_id, user_id=user.id, role="member"))
+    else:
         user = User(email=email, name=name, firebase_uid=external_id)
         session.add(user)
         await session.flush()
-
-    # Ensure membership
-    member_check = await session.execute(
-        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user.id)
-    )
-    if member_check.scalar_one_or_none() is None:
         session.add(OrgMember(org_id=org_id, user_id=user.id, role="member"))
 
     await session.commit()
@@ -219,7 +241,10 @@ async def scim_replace_user(
 
     await session.commit()
     await session.refresh(user)
-    return user_to_scim(user, org_id, base_url)
+    # Reflect the post-mutation membership state: after a deactivation the user
+    # is no longer a member, so the resource must report active=False (else the
+    # IdP sees the user as active and re-creates / reactivates → sync loop).
+    return user_to_scim(user, org_id, base_url, active=bool(active))
 
 
 async def scim_delete_user(

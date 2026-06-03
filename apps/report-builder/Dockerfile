@@ -13,10 +13,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.0 /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml ./
+COPY report_builder ./report_builder
 RUN uv venv /opt/venv && \
     VIRTUAL_ENV=/opt/venv uv pip install --no-cache .
-
-COPY report_builder ./report_builder
 
 FROM python:3.13-slim AS runtime
 
@@ -35,4 +34,4 @@ WORKDIR /app
 USER 1000:1000
 
 ENTRYPOINT ["tini", "--"]
-CMD ["python", "-m", "report_builder"]
+CMD ["python", "-m", "report_builder.runner"]

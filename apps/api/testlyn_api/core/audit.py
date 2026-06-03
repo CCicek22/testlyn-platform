@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.core.auth import CurrentUser, get_current_user
 from testlyn_api.core.db import get_session
 from testlyn_api.models.audit_log import AuditLog
+from testlyn_api.services import audit_siem
 
 log = structlog.get_logger(__name__)
 
@@ -64,6 +65,34 @@ class AuditContext:
             resource_id=str(resource_id) if resource_id else None,
             org_id=str(effective_org_id),
         )
+        await self._export_to_sinks(entry, effective_org_id)
+
+    async def _export_to_sinks(
+        self, entry: AuditLog, org_id: uuid.UUID
+    ) -> None:
+        """Fan an audit row out to active SIEM sinks, off the request hot-path.
+
+        A cheap query returns early when the org has no sinks. Delivery itself
+        runs in detached fire-and-forget tasks (see ``audit_siem``) so a slow or
+        failing SIEM endpoint never blocks or fails the audit write, and one
+        sink's failure can't break another or the caller.
+        """
+        if self._session is None:
+            return
+        try:
+            sinks = await audit_siem.active_sinks_for_org(org_id, self._session)
+            if not sinks:
+                return
+            # Flush so server_default columns (id, created_at) are populated,
+            # then snapshot the row to a plain dict WHILE still on-session. The
+            # detached dispatch tasks must never touch the ORM object — by the
+            # time they run the request's AsyncSession may be committed/closed,
+            # and a lazy refresh there fails silently, dropping every event.
+            await self._session.flush()
+            event = audit_siem._event_dict(entry)
+            audit_siem.dispatch_event_background(sinks, event)
+        except Exception as exc:  # noqa: BLE001 — SIEM must never break audit write
+            log.error("audit.siem_dispatch_failed", org_id=str(org_id), error=str(exc))
 
 
 class AuditService:

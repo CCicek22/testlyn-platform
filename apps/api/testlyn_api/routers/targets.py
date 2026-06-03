@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from testlyn_api.deps import AuditDep, CurrentUserDep, SessionDep
 from testlyn_api.models.org import Organization, OrgMember
@@ -81,9 +81,26 @@ async def list_targets(
 
     items_q = base_q.order_by(Target.created_at.asc(), Target.id.asc()).limit(limit + 1)
     if after is not None:
-        after_target = await session.get(Target, after)
-        if after_target is not None:
-            items_q = items_q.where(Target.id > after)
+        # Keyset pagination on the SAME tuple we order by — (created_at ASC,
+        # id ASC). Filtering on Target.id alone skips/duplicates rows because the
+        # id is a random uuid4 unrelated to created_at order. Reference the
+        # cursor row's created_at via a correlated scalar subquery (rather than a
+        # Python round-trip) so the comparison stays column-to-column in the DB
+        # and isn't broken by datetime serialization differences across backends.
+        cursor_exists = await session.scalar(select(Target.id).where(Target.id == after))
+        if cursor_exists is not None:
+            cursor_created_at = (
+                select(Target.created_at).where(Target.id == after).scalar_subquery()
+            )
+            items_q = items_q.where(
+                or_(
+                    Target.created_at > cursor_created_at,
+                    and_(
+                        Target.created_at == cursor_created_at,
+                        Target.id > after,
+                    ),
+                )
+            )
 
     rows = (await session.execute(items_q)).scalars().all()
 

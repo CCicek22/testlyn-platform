@@ -7,15 +7,16 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from testlyn_api.core import tasks as tasks_module
 from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import AuditDep, CurrentUserDep, SessionDep
 from testlyn_api.models.org import Organization
 from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test
 from testlyn_api.models.test_run import TestRun
+from testlyn_api.products.load import bq_queries
 from testlyn_api.schemas.test_run import RunCreate, RunOut
 from testlyn_api.services.quota import QuotaService
+from testlyn_api.services.runs import create_run_for_test
 
 log = structlog.get_logger(__name__)
 
@@ -34,12 +35,9 @@ async def create_run(
     session: SessionDep,
     audit: AuditDep,
 ) -> RunOut:
-    from testlyn_api.config import get_settings
-
     test = await _get_test_or_404(test_id, session)
-    settings = get_settings()
 
-    # Resolve org via project for quota check + audit
+    # Resolve org via project up front so RBAC + audit run before any mutation.
     project = await session.get(Project, test.project_id)
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -50,27 +48,7 @@ async def create_run(
     audit.set_org(org.id)
     await _enforce_perm("run", "test", user_id=current_user.id, org_id=org.id, project_id=project.id, session=session)
 
-    # Extract VU/duration from test config (defaults: 1 VU, 60s)
-    config: dict = test.config or {}
-    vus: int = int(config.get("vus", 1))
-    duration_seconds: int = int(config.get("duration_seconds", 60))
-
-    quota = QuotaService(session)
-    await quota.check_can_run(org, vus, duration_seconds)
-
-    run = TestRun(
-        test_id=test.id,
-        product=test.product,
-        state="queued",
-        region=settings.gcp_region,
-        triggered_by=current_user.id,
-    )
-    session.add(run)
-    await session.flush()
-
-    await quota.record_usage(org, run)
-    await session.commit()
-    await session.refresh(run)
+    run, org = await create_run_for_test(session, test, triggered_by=current_user.id)
 
     await audit.write(
         action="test_run.created",
@@ -81,12 +59,6 @@ async def create_run(
     )
     await session.commit()
 
-    # Dispatch async — don't await (fire-and-forget via Cloud Tasks or docker).
-    # Resolved through the module rather than as a direct binding so tests can
-    # monkeypatch tasks.enqueue_run without touching this router.
-    await tasks_module.enqueue_run(run.id)
-
-    log.info("run.created", run_id=str(run.id), test_id=str(test_id))
     return RunOut.from_run_and_test(run, test)
 
 
@@ -168,6 +140,38 @@ async def get_run_summary(
     }
 
 
+@router.get("/runs/{run_id}/samples")
+async def get_run_samples(
+    run_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+) -> list[dict]:
+    """Return the persisted per-second metrics for a run, oldest-first.
+
+    Element shape matches the live SSE ``sample`` payload
+    (``ts``, ``p95_duration_ms``, ``error_rate``, ``vus``) so the frontend can
+    reuse the same chart for completed runs. Server-side authorized BQ read —
+    the browser never gets BQ creds (CLAUDE.md §7). Empty array if no samples.
+    """
+    from testlyn_api.config import get_settings
+
+    run = await _get_run_or_404(run_id, session)
+    test = await session.get(Test, run.test_id)
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+    project = await session.get(Project, test.project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    await _enforce_perm("read", "test_run", user_id=current_user.id, org_id=project.org_id, project_id=project.id, session=session)
+
+    settings = get_settings()
+    return await bq_queries.fetch_run_samples(
+        run_id=run_id,
+        project=settings.gcp_project_id,
+        dataset=settings.gcp_bq_dataset,
+    )
+
+
 @router.post("/runs/{run_id}/cancel", status_code=status.HTTP_200_OK, response_model=RunOut)
 async def cancel_run(
     run_id: uuid.UUID,
@@ -192,8 +196,33 @@ async def cancel_run(
             detail=f"Run is in state {run.state!r} and cannot be cancelled",
         )
 
+    # Stop the underlying runner so the Cloud Run Job actually halts instead of
+    # continuing to stream to BQ and burn quota. runner_id is None while still
+    # queued (never launched) — nothing to stop in that case.
+    if run.runner_id is not None:
+        from testlyn_api.core.runner_registry import RUNNERS
+
+        runner = RUNNERS.get(run.product)
+        if runner is not None:
+            try:
+                await runner.cancel(runner_id=run.runner_id)
+            except Exception as exc:  # noqa: BLE001 — best-effort stop; still mark cancelled
+                log.error(
+                    "run.cancel_runner_failed",
+                    run_id=str(run_id),
+                    runner_id=run.runner_id,
+                    error=str(exc),
+                )
+
     run.state = "cancelled"
     run.finished_at = datetime.now(tz=UTC)
+
+    # Reverse the usage we recorded at create_run time — a cancelled run never
+    # consumed its quota. Idempotent.
+    org = await session.get(Organization, project.org_id)
+    if org is not None:
+        await QuotaService(session).release_usage(org, run)
+
     await session.commit()
     await session.refresh(run)
 
