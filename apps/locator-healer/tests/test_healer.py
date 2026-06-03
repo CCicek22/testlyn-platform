@@ -128,7 +128,10 @@ class TestHealEndpoint:
         """With LOCATOR_HEALING_ENABLED=1 and creds missing, falls back to heuristic."""
         body = _sample_body()
 
-        import google.auth.exceptions
+        # google-* is an optional dependency (the Gemini path lazily imports it
+        # and falls back to the heuristic on ImportError). Skip this test when
+        # it isn't installed rather than crashing at collection time.
+        google_auth_exc = pytest.importorskip("google.auth.exceptions")
 
         with (
             patch(
@@ -138,7 +141,7 @@ class TestHealEndpoint:
             patch("main.LOCATOR_HEALING_ENABLED", True),
             patch(
                 "google.auth.default",
-                side_effect=google.auth.exceptions.DefaultCredentialsError(),
+                side_effect=google_auth_exc.DefaultCredentialsError(),
             ),
         ):
             resp = await client.post("/heal", json=body)

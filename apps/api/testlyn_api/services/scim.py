@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.models.org import OrgMember
@@ -80,6 +80,13 @@ def scim_error(status: int, detail: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _parse_username_filter(filter_str: str | None) -> str | None:
+    """Extract the email from a SCIM ``userName eq "x"`` filter, else None."""
+    if not filter_str or "userName eq" not in filter_str or '"' not in filter_str:
+        return None
+    return filter_str.split('"')[1]
+
+
 async def scim_list_users(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -88,30 +95,33 @@ async def scim_list_users(
     count: int = 100,
     filter_str: str | None = None,
 ) -> dict[str, Any]:
-    """GET /v2/scim/{org_id}/Users"""
-    # Get all org members then load their users
-    members_result = await session.execute(
-        select(OrgMember).where(OrgMember.org_id == org_id).offset(start_index - 1).limit(count)
-    )
-    members = list(members_result.scalars().all())
-    user_ids = [m.user_id for m in members]
+    """GET /v2/scim/{org_id}/Users
 
-    resources: list[dict[str, Any]] = []
-    if user_ids:
-        users_result = await session.execute(select(User).where(User.id.in_(user_ids)))
-        for user in users_result.scalars().all():
-            # Simple filter support: userName eq "..."
-            if filter_str:
-                if "userName eq" in filter_str:
-                    email_filter = filter_str.split('"')[1] if '"' in filter_str else None
-                    if email_filter and user.email != email_filter:
-                        continue
-            resources.append(user_to_scim(user, org_id, base_url))
+    The ``userName eq`` filter is applied at the DB level (joining members to
+    users) so a matching member is found regardless of paging — IdP sync issues
+    ``?filter=userName eq "x"`` and expects the single match. ``totalResults``
+    reflects the *filtered* set so the IdP can decide create-vs-update.
+    """
+    email_filter = _parse_username_filter(filter_str)
+
+    base_q = (
+        select(User)
+        .join(OrgMember, OrgMember.user_id == User.id)
+        .where(OrgMember.org_id == org_id)
+    )
+    if email_filter is not None:
+        base_q = base_q.where(User.email == email_filter)
 
     total_result = await session.execute(
-        select(OrgMember).where(OrgMember.org_id == org_id)
+        select(func.count()).select_from(base_q.subquery())
     )
-    total = len(list(total_result.scalars().all()))
+    total = total_result.scalar_one()
+
+    page_q = base_q.order_by(User.created_at.asc()).offset(start_index - 1).limit(count)
+    users_result = await session.execute(page_q)
+    resources = [
+        user_to_scim(user, org_id, base_url) for user in users_result.scalars().all()
+    ]
 
     return {
         "schemas": [SCIM_LIST_SCHEMA],

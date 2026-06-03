@@ -51,8 +51,11 @@ def _parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
 class _FakeEvent:
     """Minimal stand-in for an ADK Event carrying one text part."""
 
-    def __init__(self, text: str, author: str = "load_agent") -> None:
+    def __init__(
+        self, text: str, author: str = "load_agent", partial: bool = False
+    ) -> None:
         self.author = author
+        self.partial = partial
 
         class _Part:
             def __init__(self, t: str) -> None:
@@ -80,6 +83,20 @@ class _StubRunner:
     async def run_async(self, **_kwargs: Any) -> AsyncGenerator[_FakeEvent, None]:
         for chunk in self._chunks:
             yield _FakeEvent(chunk)
+
+
+class _StreamingStubRunner:
+    """Runner mimicking ADK StreamingMode.SSE: partial deltas then a final
+    non-partial event carrying the FULL aggregated text of the turn."""
+
+    def __init__(self, deltas: list[str]) -> None:
+        self._deltas = deltas
+
+    async def run_async(self, **_kwargs: Any) -> AsyncGenerator[_FakeEvent, None]:
+        for delta in self._deltas:
+            yield _FakeEvent(delta, partial=True)
+        # ADK's trailing aggregate: the whole reply again, non-partial.
+        yield _FakeEvent("".join(self._deltas), partial=False)
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +133,30 @@ async def test_chat_stream_emits_token_then_done(
 
     done = next(data for name, data in events if name == "done")
     assert done["session_id"] == "sess-Aa1"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_sse_mode_does_not_duplicate_final_aggregate(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under streaming (partial deltas + a trailing full-text aggregate), the
+    reply must be emitted ONCE — the aggregate is dropped, not re-streamed."""
+    monkeypatch.setattr(
+        chat_routes, "get_runner", lambda: _StreamingStubRunner(["hel", "lo ", "world"])
+    )
+
+    resp = await client.post(
+        "/chat/stream",
+        json={"message": "hi", "session_id": "sess-Dd4"},
+        headers={"Authorization": "Bearer tok-A"},
+    )
+    assert resp.status_code == 200
+
+    events = _parse_sse(resp.text)
+    tokens = [data["text"] for name, data in events if name == "token"]
+    # Deltas streamed once; the trailing "hello world" aggregate suppressed.
+    assert "".join(tokens) == "hello world"
+    assert "hello world" not in tokens, "final aggregate was re-emitted (duplicate)"
 
 
 @pytest.mark.asyncio

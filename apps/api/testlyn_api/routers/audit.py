@@ -23,7 +23,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.core.permissions import perm_dep
@@ -91,6 +91,7 @@ def _build_filter(
     actor_id: uuid.UUID | None,
     from_dt: datetime | None,
     to_dt: datetime | None,
+    cursor_created_at: datetime | None,
     cursor: uuid.UUID | None,
 ) -> list[Any]:
     clauses: list[Any] = [AuditLog.org_id == org_id]
@@ -102,8 +103,20 @@ def _build_filter(
         clauses.append(AuditLog.created_at >= from_dt)
     if to_dt:
         clauses.append(AuditLog.created_at <= to_dt)
-    if cursor:
-        clauses.append(AuditLog.id < cursor)
+    if cursor is not None and cursor_created_at is not None:
+        # Keyset pagination on the SAME tuple we order by — (created_at DESC,
+        # id DESC). Filtering on id alone is wrong here because id is a random
+        # uuid4 and does not track created_at, which would skip/duplicate rows
+        # across pages.
+        clauses.append(
+            or_(
+                AuditLog.created_at < cursor_created_at,
+                and_(
+                    AuditLog.created_at == cursor_created_at,
+                    AuditLog.id < cursor,
+                ),
+            )
+        )
     return clauses
 
 
@@ -118,12 +131,21 @@ async def _fetch_page(
     cursor: uuid.UUID | None,
     limit: int,
 ) -> list[AuditLog]:
+    # Resolve the cursor row's created_at so the keyset comparison can use the
+    # full (created_at, id) ordering key.
+    cursor_created_at: datetime | None = None
+    if cursor is not None:
+        cursor_created_at = await session.scalar(
+            select(AuditLog.created_at).where(AuditLog.id == cursor)
+        )
+
     clauses = _build_filter(
         org_id,
         action=action,
         actor_id=actor_id,
         from_dt=from_dt,
         to_dt=to_dt,
+        cursor_created_at=cursor_created_at,
         cursor=cursor,
     )
     q = (

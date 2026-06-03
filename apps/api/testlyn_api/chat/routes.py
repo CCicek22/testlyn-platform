@@ -147,6 +147,13 @@ async def chat_stream(
     async def event_stream() -> AsyncGenerator[dict[str, str], None]:
         last_author: str | None = None
         errored = False
+        # When the runner streams partial text deltas (StreamingMode.SSE), ADK
+        # also emits a final non-partial event carrying the FULL aggregated text
+        # of the turn. Emitting both would duplicate the assistant reply on the
+        # client. Track whether we've streamed partial text for the current
+        # author so we can drop that trailing aggregate. Inert under the default
+        # StreamingMode.NONE (no partials → nothing suppressed).
+        streamed_partial = False
         try:
             async for event in runner.run_async(
                 user_id=user_id,
@@ -160,6 +167,7 @@ async def chat_stream(
                     and event.author != "user"
                 ):
                     last_author = event.author
+                    streamed_partial = False
                     yield {
                         "event": "agent_switch",
                         "data": json.dumps({"to": event.author}),
@@ -187,12 +195,22 @@ async def chat_stream(
                     }
 
                 # 3. Token / text streaming from the model.
+                is_partial = bool(getattr(event, "partial", False))
                 text = _extract_text(event)
                 if text:
-                    yield {
-                        "event": "token",
-                        "data": json.dumps({"text": text}),
-                    }
+                    # Drop the trailing full-text aggregate that follows a
+                    # partial stream (SSE mode) — it duplicates what we already
+                    # sent as deltas. Always emit when no partials were streamed
+                    # (NONE mode: the single event IS the reply).
+                    if not is_partial and streamed_partial:
+                        streamed_partial = False
+                    else:
+                        if is_partial:
+                            streamed_partial = True
+                        yield {
+                            "event": "token",
+                            "data": json.dumps({"text": text}),
+                        }
         except TestlynAPIError as exc:
             errored = True
             log.exception("chat_stream.upstream_failed", status=exc.status_code)

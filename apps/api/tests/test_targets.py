@@ -112,6 +112,40 @@ async def test_list_targets_pagination(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_targets_pagination_walks_all_pages(client: AsyncClient) -> None:
+    """Walking pages via the cursor must yield every row exactly once.
+
+    Regression: cursor used Target.id while ordering by created_at, so the
+    `id > after` filter skipped/duplicated rows under random UUID ids.
+    """
+    org_id = await _create_org(client, "Org PagWalk")
+    created: set[str] = set()
+    for i in range(7):
+        r = await client.post(
+            f"/v1/orgs/{org_id}/targets",
+            json={"name": f"walk-{i}", "kind": "api"},
+        )
+        created.add(r.json()["id"])
+
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(10):  # safety bound
+        url = f"/v1/orgs/{org_id}/targets?limit=2"
+        if cursor is not None:
+            url += f"&after={cursor}"
+        resp = await client.get(url)
+        assert resp.status_code == 200
+        data = resp.json()
+        seen.extend(item["id"] for item in data["items"])
+        cursor = data["cursor"]
+        if cursor is None:
+            break
+
+    assert len(seen) == len(set(seen)), "pages overlap — duplicate rows returned"
+    assert set(seen) == created, "cursor pagination dropped or skipped rows"
+
+
+@pytest.mark.asyncio
 async def test_update_target(client: AsyncClient) -> None:
     org_id = await _create_org(client, "Org D")
     create_resp = await client.post(

@@ -90,9 +90,22 @@ async def test_audit_log_pagination_cursor(
     db_session: AsyncSession,
     dev_user_id: uuid.UUID,
 ) -> None:
+    from datetime import UTC, datetime, timedelta
+
     org_id = await _create_org(client, "PaginateAuditOrg")
     await _set_role(db_session, org_id, dev_user_id, "admin")
-    await _seed_audit_rows(db_session, org_id, 5)
+    rows = await _seed_audit_rows(db_session, org_id, 5)
+    # Give each row a distinct created_at so keyset pagination orders by the
+    # (created_at, id) tuple deterministically (mirrors production, where
+    # rows arrive at distinct timestamps).
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    for i, row in enumerate(rows):
+        await db_session.execute(
+            update(AuditLog)
+            .where(AuditLog.id == row.id)
+            .values(created_at=base + timedelta(minutes=i))
+        )
+    await db_session.commit()
 
     # Fetch with limit=3 — expect cursor
     resp = await client.get(f"/v1/orgs/{org_id}/audit-log?limit=3")
@@ -108,6 +121,60 @@ async def test_audit_log_pagination_cursor(
     body2 = resp2.json()
     assert len(body2["items"]) == 2  # remaining rows
     assert body2["cursor"] is None
+    # No row appears on both pages.
+    page1_ids = {i["id"] for i in body["items"]}
+    page2_ids = {i["id"] for i in body2["items"]}
+    assert page1_ids.isdisjoint(page2_ids)
+
+
+@pytest.mark.asyncio
+async def test_audit_log_pagination_distinct_timestamps_no_dupes(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_user_id: uuid.UUID,
+) -> None:
+    """Keyset pagination must walk the full set exactly once when rows have
+    distinct created_at values.
+
+    Regression: filtering on the random uuid4 ``id`` alone (instead of the
+    (created_at, id) ordering key) skipped/duplicated rows across pages.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    org_id = await _create_org(client, "PaginateDistinctTsOrg")
+    await _set_role(db_session, org_id, dev_user_id, "admin")
+    rows = await _seed_audit_rows(db_session, org_id, 5)
+
+    # Spread created_at so ordering is driven by created_at, not id. Because
+    # ids are random uuid4, an id-only cursor would mis-order these.
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    for i, row in enumerate(rows):
+        await db_session.execute(
+            update(AuditLog)
+            .where(AuditLog.id == row.id)
+            .values(created_at=base + timedelta(minutes=i))
+        )
+    await db_session.commit()
+
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(10):  # safety bound
+        url = f"/v1/orgs/{org_id}/audit-log?limit=2"
+        if cursor:
+            url += f"&cursor={cursor}"
+        resp = await client.get(url)
+        assert resp.status_code == 200
+        body = resp.json()
+        seen.extend(item["id"] for item in body["items"])
+        cursor = body["cursor"]
+        if cursor is None:
+            break
+
+    assert len(seen) == 5, f"expected 5 rows once, got {len(seen)}"
+    assert len(set(seen)) == 5, "duplicate rows across pages"
+    assert set(seen) == {str(r.id) for r in rows}
+    # Newest-first ordering preserved.
+    assert seen[0] == str(rows[-1].id)
 
 
 @pytest.mark.asyncio

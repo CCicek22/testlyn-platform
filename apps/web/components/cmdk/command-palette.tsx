@@ -107,6 +107,16 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
+      onKeyDown={(e) => {
+        // cmdk's <Command> only binds arrow/enter navigation; Escape-to-close
+        // is the consumer's responsibility. Without this the footer's "ESC
+        // close" hint does nothing and the palette is only dismissable by
+        // clicking the backdrop.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          handleClose();
+        }
+      }}
     >
       {/* Backdrop */}
       <motion.div
