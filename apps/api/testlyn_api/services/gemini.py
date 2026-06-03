@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from typing import Any
@@ -31,6 +32,32 @@ def _cache_key(namespace: str, payload: str) -> str:
     return f"gemini:{namespace}:{digest}"
 
 
+_initialized = False
+_credentials = None
+_init_lock = asyncio.Lock()
+
+
+async def _get_vertex_credentials() -> Any:
+    global _credentials
+    if _credentials is not None:
+        return _credentials
+
+    import google.auth
+    
+    def fetch_creds():
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        return credentials
+
+    try:
+        _credentials = await asyncio.to_thread(fetch_creds)
+    except Exception as exc:
+        log.warning("vertex_creds_fetch_failed", error=str(exc))
+        raise
+    return _credentials
+
+
 async def _cached_generate(namespace: str, prompt: str, fallback: str) -> str:
     redis = get_redis()
     key = _cache_key(namespace, prompt)
@@ -42,7 +69,7 @@ async def _cached_generate(namespace: str, prompt: str, fallback: str) -> str:
     except Exception:
         log.warning("gemini.cache_read_error", key=key)
 
-    result = await _call_vertex(prompt, fallback)
+    result = await call_vertex(prompt, fallback)
 
     try:
         await redis.set(key, result, ex=_CACHE_TTL)
@@ -52,7 +79,8 @@ async def _cached_generate(namespace: str, prompt: str, fallback: str) -> str:
     return result
 
 
-async def _call_vertex(prompt: str, fallback: str) -> str:
+async def call_vertex(prompt: str, fallback: str) -> str:
+    global _initialized
     settings = get_settings()
     model_id = settings.gemini_model
     project = settings.gcp_project_id
@@ -63,18 +91,26 @@ async def _call_vertex(prompt: str, fallback: str) -> str:
         import google.auth.exceptions
         from google.cloud import aiplatform
 
-        try:
-            credentials, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-        except google.auth.exceptions.DefaultCredentialsError:
-            log.warning(
-                "vertex_creds_missing",
-                model=model_id,
-            )
-            return fallback
+        if not _initialized:
+            async with _init_lock:
+                if not _initialized:
+                    try:
+                        creds = await _get_vertex_credentials()
+                    except google.auth.exceptions.DefaultCredentialsError:
+                        log.warning(
+                            "vertex_creds_missing",
+                            model=model_id,
+                        )
+                        return fallback
 
-        aiplatform.init(project=project, location=location, credentials=credentials)
+                    # Run blocking aiplatform.init in a background thread
+                    await asyncio.to_thread(
+                        aiplatform.init,
+                        project=project,
+                        location=location,
+                        credentials=creds,
+                    )
+                    _initialized = True
 
         from vertexai.generative_models import GenerativeModel
 

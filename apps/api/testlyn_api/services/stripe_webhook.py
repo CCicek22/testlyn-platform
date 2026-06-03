@@ -47,8 +47,14 @@ def _price_to_plan() -> dict[str, str]:
 
 def _plan_from_subscription(sub: dict[str, Any]) -> str:
     status = sub.get("status", "")
+    # Terminal statuses (canceled, unpaid, incomplete, paused, etc.) must map by
+    # status, never by price id — a deleted/canceled subscription payload still
+    # carries items[].price.id, so a price-first lookup would wrongly keep the
+    # org on the paid plan after cancellation.
+    if status not in ("active", "trialing"):
+        return _STATUS_TO_PLAN.get(status, "free")
     price_to_plan = _price_to_plan()
-    # Try to find plan from price id first
+    # Active subscriptions: resolve the exact paid tier from the price id.
     items = sub.get("items", {}).get("data", [])
     for item in items:
         price_id = item.get("price", {}).get("id", "")
@@ -125,7 +131,7 @@ async def handle_event(
 
     try:
         event = stripe.Webhook.construct_event(raw_body, sig_header, webhook_secret)
-    except stripe.errors.SignatureVerificationError as exc:
+    except stripe.SignatureVerificationError as exc:
         log.warning("stripe_webhook.invalid_signature", detail=str(exc))
         raise
 

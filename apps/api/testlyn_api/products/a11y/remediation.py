@@ -79,13 +79,6 @@ async def _call_gemini(
     html_snippet: str,
     help_url: str,
 ) -> str:
-    from testlyn_api.config import get_settings
-
-    settings = get_settings()
-    model_id = settings.gemini_model
-    project = settings.gcp_project_id
-    location = settings.vertex_ai_location
-
     fallback = _WCAG_FALLBACK_TPL.format(
         rule_id=rule_id, impact=impact, help_url=help_url
     )
@@ -100,38 +93,5 @@ async def _call_gemini(
         f"Reference: {help_url}"
     )
 
-    try:
-        import google.auth
-        import google.auth.exceptions
-        from google.cloud import aiplatform
-
-        try:
-            credentials, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-        except google.auth.exceptions.DefaultCredentialsError:
-            log.warning("a11y.remediation.creds_missing", rule_id=rule_id)
-            return fallback
-
-        aiplatform.init(project=project, location=location, credentials=credentials)
-
-        from vertexai.generative_models import GenerativeModel
-
-        model = GenerativeModel(model_id)
-        response = await model.generate_content_async(prompt)
-        return response.text
-
-    except ImportError:
-        log.warning(
-            "a11y.remediation.creds_missing",
-            rule_id=rule_id,
-            detail="google-cloud-aiplatform not installed",
-        )
-        return fallback
-    except Exception as exc:
-        log.warning(
-            "a11y.remediation.vertex_error",
-            rule_id=rule_id,
-            detail=str(exc),
-        )
-        return fallback
+    from testlyn_api.services.gemini import call_vertex
+    return await call_vertex(prompt, fallback)

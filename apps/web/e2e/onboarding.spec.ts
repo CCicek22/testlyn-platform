@@ -18,7 +18,7 @@ import path from "node:path";
 
 const FIREBASE_API_KEY =
   process.env["FIREBASE_WEB_API_KEY"] ??
-  "REDACTED_FIREBASE_WEB_API_KEY";
+  "mock-firebase-api-key-placeholder";
 
 const EVIDENCE_DIR = path.resolve(
   __dirname,

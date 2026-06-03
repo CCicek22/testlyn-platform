@@ -117,6 +117,37 @@ async def test_scim_list_users_filter_by_username(db_session: AsyncSession) -> N
     )
     assert len(result["Resources"]) == 1
     assert result["Resources"][0]["userName"] == "carol@example.com"
+    # totalResults must reflect the filtered set (IdP sync relies on this to
+    # decide create-vs-update), not the unfiltered member count.
+    assert result["totalResults"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scim_list_users_filter_finds_member_beyond_first_page(
+    db_session: AsyncSession,
+) -> None:
+    """A filtered lookup must find the matching member even when, by insertion
+    order, it would fall outside the first ``count`` window — IdPs query
+    ``?filter=userName eq "x"`` and expect the single match regardless of paging.
+    """
+    org = await _make_org(db_session)
+    # Insert many members; the target's row lands well past a small page window.
+    for i in range(10):
+        u = await _make_user(db_session, f"bulk-{i}@example.com")
+        await _add_member(db_session, org.id, u.id)
+    target = await _make_user(db_session, "needle@example.com")
+    await _add_member(db_session, org.id, target.id)
+
+    result = await scim_list_users(
+        db_session,
+        org.id,
+        _BASE_URL,
+        count=3,
+        filter_str='userName eq "needle@example.com"',
+    )
+    assert result["totalResults"] == 1
+    assert len(result["Resources"]) == 1
+    assert result["Resources"][0]["userName"] == "needle@example.com"
 
 
 # ---------------------------------------------------------------------------

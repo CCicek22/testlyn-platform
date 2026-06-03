@@ -77,7 +77,7 @@ async def _extract_org_id(request: Request) -> str | None:
     new access), so a forged path id can at most lock the caller out of an
     org they have no real access to.
     """
-    from testlyn_api.core.org_context import resolve_org_and_plan
+    from testlyn_api.core.org_context import OrgContextError, resolve_org_and_plan
     from testlyn_api.core.token_verify import extract_bearer, verify_token
 
     token = extract_bearer(request.headers.get("Authorization", ""))
@@ -86,7 +86,11 @@ async def _extract_org_id(request: Request) -> str | None:
         if claims is not None:
             uid = claims.get("uid") or claims.get("user_id") or claims.get("sub")
             if uid:
-                org_id, _plan = await resolve_org_and_plan(str(uid))
+                try:
+                    org_id, _plan = await resolve_org_and_plan(str(uid))
+                except OrgContextError as exc:
+                    log.error("ip_allowlist._extract_org_id.db_error_fail_closed", uid=uid, exc=str(exc))
+                    raise AllowlistDBError("db_error") from exc
                 if org_id is not None:
                     return org_id
 
@@ -171,16 +175,15 @@ class IPAllowlistMiddleware(BaseHTTPMiddleware):
         if not request.url.path.startswith("/v1/"):
             return await call_next(request)
 
-        org_id = await _extract_org_id(request)
-        if org_id is None:
-            return await call_next(request)
-
+        org_id = None
         try:
+            org_id = await _extract_org_id(request)
+            if org_id is None:
+                return await call_next(request)
             cidrs = await _load_cidrs(org_id)
         except AllowlistDBError:
             # Fail CLOSED on a DB error: we cannot confirm the request's IP is
-            # allowed, so deny rather than silently bypass the control. The
-            # alert is emitted in _load_cidrs (ip_allowlist.db_error_fail_closed).
+            # allowed, so deny rather than silently bypass the control.
             log.error("ip_allowlist.denied_db_error", org_id=org_id, path=request.url.path)
             return Response(
                 content='{"detail":"IP allowlist temporarily unavailable"}',

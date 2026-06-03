@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ export default function NewTestPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("project") ?? "";
+  const qc = useQueryClient();
 
   const [name, setName] = useState("");
   const [vus, setVus] = useState(10);
@@ -46,6 +47,7 @@ export default function NewTestPage() {
     mutationFn: (payload: CreateTestRequest) =>
       api.projects.createTest(projectId, payload),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["tests", projectId] });
       router.push(`/projects/${projectId}`);
     },
     onError: (err) => {

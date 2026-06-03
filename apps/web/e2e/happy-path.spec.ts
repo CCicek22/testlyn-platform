@@ -24,6 +24,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { execSync } from "node:child_process";
 
 const BASE_URL = process.env["PLAYWRIGHT_BASE_URL"] ?? "http://localhost:3000";
 
@@ -41,7 +42,18 @@ export default function () {
 
 // Wrapped in skip — remove the `.skip` once the full docker-compose stack is running locally.
 // See comment block above for enable instructions.
-test.describe.skip("Happy path — dev-bypass login to live chart", () => {
+test.describe("Happy path — dev-bypass login to live chart", () => {
+  test.beforeAll(async () => {
+    try {
+      execSync(
+        `docker compose -f ./infra/docker-compose.dev.yml exec -T postgres psql -U testlyn_api -d testlyn -c "DELETE FROM projects WHERE name = 'Smoke Test Project';"`
+      );
+      console.log("Database cleaned up successfully: deleted existing project 'Smoke Test Project'.");
+    } catch (err) {
+      console.error("Warning: DB cleanup command failed, proceeding anyway...", err);
+    }
+  });
+
   test("signup → project → test → run → live chart", async ({ page }) => {
     // ── 1. Navigate to /login, click "Continue as dev@testlyn.io" ──────────────
     await page.goto(`${BASE_URL}/login`);
@@ -57,16 +69,29 @@ test.describe.skip("Happy path — dev-bypass login to live chart", () => {
     await expect(page).toHaveURL(/\/projects/);
     await expect(page.getByRole("heading", { name: /projects/i })).toBeVisible();
 
+    // Skip the product tour if it appears on projects list page
+    const skipTourProjects = page.getByRole("button", { name: /skip tour/i });
+    try {
+      await skipTourProjects.waitFor({ state: "visible", timeout: 3000 });
+      await skipTourProjects.click();
+      console.log("Successfully dismissed Product tour modal on Projects dashboard.");
+    } catch {
+      console.log("Product tour modal did not appear on Projects dashboard.");
+    }
+
     const newProjectButton = page.getByRole("button", { name: /new project/i });
     await expect(newProjectButton).toBeVisible();
     await newProjectButton.click();
 
     // Dialog / modal should appear
-    const nameInput = page.getByLabel(/project name/i);
+    const nameInput = page.locator("#proj-name");
     await expect(nameInput).toBeVisible();
     await nameInput.fill("Smoke Test Project");
 
-    await page.getByRole("button", { name: /create/i }).click();
+    await page.getByRole("button", { name: /create project/i }).click();
+
+    // Wait for the Radix UI Dialog overlay for 'Create project' to fully animate out and close
+    await expect(page.locator("[role='dialog']").filter({ hasText: /create/i })).toBeHidden();
 
     // Project should appear in the list (or redirect to project page)
     await expect(page.getByText("Smoke Test Project")).toBeVisible();
@@ -75,9 +100,19 @@ test.describe.skip("Happy path — dev-bypass login to live chart", () => {
     await page.getByText("Smoke Test Project").click();
     await expect(page).toHaveURL(/\/projects\//);
 
+    // If "Product tour" is still visible on details page, skip it to prevent click interception
+    const skipTour = page.getByRole("button", { name: /skip tour/i });
+    try {
+      await skipTour.waitFor({ state: "visible", timeout: 2000 });
+      await skipTour.click();
+      console.log("Successfully dismissed Product tour modal on project details page.");
+    } catch {
+      console.log("Product tour modal did not appear on project details page.");
+    }
+
     await page.getByRole("button", { name: /new test/i }).click();
 
-    const testNameInput = page.getByLabel(/test name/i);
+    const testNameInput = page.locator("#test-name");
     await expect(testNameInput).toBeVisible();
     await testNameInput.fill("Smoke Load Test");
 
@@ -86,16 +121,21 @@ test.describe.skip("Happy path — dev-bypass login to live chart", () => {
     await monacoEditor.focus();
     // Select all + replace with our script
     await monacoEditor.press("ControlOrMeta+a");
-    await monacoEditor.fill(MINIMAL_K6_SCRIPT);
+    await page.keyboard.type(MINIMAL_K6_SCRIPT);
 
     await page.getByRole("button", { name: /create test/i }).click();
 
     await expect(page.getByText("Smoke Load Test")).toBeVisible();
 
-    // ── 4. Click "Run" on the test, navigate to /runs/<id> ────────────────────
-    await page.getByRole("button", { name: /run/i }).first().click();
+    // ── 4. Click "Runs" on the test to go to its details page, then click "Start run" ────────
+    await page.getByRole("button", { name: "Runs" }).first().click();
+    await page.waitForURL(/\/tests\/[0-9a-f-]+/);
 
-    // API returns TestRun with an id; the page should redirect or navigate to /runs/<id>
+    const startRunButton = page.getByRole("button", { name: "Start a new run for this test" });
+    await expect(startRunButton).toBeVisible();
+    await startRunButton.click();
+
+    // API returns TestRun with an id and redirects to /runs/<id>/<product>
     await page.waitForURL(/\/runs\/[0-9a-f-]+/, { timeout: 10_000 });
 
     const runId = page.url().split("/runs/")[1];

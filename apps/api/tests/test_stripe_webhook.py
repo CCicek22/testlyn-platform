@@ -236,6 +236,23 @@ class TestHandleEvent:
         assert log_row is not None
         assert log_row.event_type == "customer.subscription.created"
 
+    async def test_invalid_signature_raises_sve(self, stripe_env, db_session):
+        """A genuinely invalid signature must raise SignatureVerificationError.
+
+        Regression: the except clause referenced the non-existent
+        ``stripe.errors`` attribute (stripe 15.x exposes it at top level), so the
+        handler raised AttributeError instead of catching/re-raising the SVE.
+        """
+        sub = {"id": "sub_x", "customer": "cus_test123", "status": "active", "items": {"data": []}}
+        event = _make_event("customer.subscription.created", sub)
+        payload = json.dumps(event).encode()
+
+        from testlyn_api.services.stripe_webhook import handle_event
+
+        # Real (unmocked) construct_event with a bogus signature → SVE.
+        with pytest.raises(stripe.SignatureVerificationError):
+            await handle_event(payload, "t=1,v1=deadbeef", db_session)
+
     async def test_real_stripe_signature_verified(self, db_session, org_with_customer):
         """Real HMAC signature must verify (WebhookSignature.verify_header not mocked).
 

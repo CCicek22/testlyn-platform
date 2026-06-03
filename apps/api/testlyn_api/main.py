@@ -108,12 +108,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Rate limiting for /v1/ routes — must be added after CORS so CORS headers are
-# present even on 429 responses.  The middleware self-filters to /v1/ paths.
-app.add_middleware(RateLimitMiddleware)
 # IP allowlist enforcement — rejects /v1/ requests from IPs outside the org's
 # configured CIDRs.  Off by default (no entries = allow-all).
 app.add_middleware(IPAllowlistMiddleware)
+# Rate limiting for /v1/ routes — must be added after CORS so CORS headers are
+# present even on 429 responses.  The middleware self-filters to /v1/ paths.
+app.add_middleware(RateLimitMiddleware)
 
 app.include_router(auth.router)
 app.include_router(orgs.router)

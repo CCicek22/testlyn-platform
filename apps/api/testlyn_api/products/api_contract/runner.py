@@ -106,14 +106,47 @@ class ApiContractRunner:
                 region="local",
             )
 
+        import os
+        import httpx
+        from testlyn_api.core.url_safety import assert_safe_url
+
         openapi_url = env.get("OPENAPI_URL", "")
         target_url = env.get("TARGET_URL", "")
         max_examples = env.get("MAX_EXAMPLES", "50")
 
+        # SSRF safety validation
+        if openapi_url:
+            assert_safe_url(openapi_url)
+        if target_url:
+            assert_safe_url(target_url)
+
+        # Download OpenAPI spec safely in the backend process
+        temp_spec_path = f"/tmp/openapi-spec-{test_run_id}.json"
+        try:
+            async with httpx.AsyncClient(follow_redirects=False) as client:
+                resp = await client.get(openapi_url, timeout=15)
+                resp.raise_for_status()
+                spec_content = resp.text
+            with open(temp_spec_path, "w", encoding="utf-8") as f:
+                f.write(spec_content)
+        except Exception as exc:
+            log.error(
+                "api_contract_runner.fetch_spec_failed",
+                run_id=str(test_run_id),
+                url=openapi_url,
+                error=str(exc),
+            )
+            if os.path.exists(temp_spec_path):
+                try:
+                    os.unlink(temp_spec_path)
+                except Exception:
+                    pass
+            raise
+
         cmd = [
             "schemathesis",
             "run",
-            openapi_url,
+            temp_spec_path,
             "--base-url",
             target_url,
             "--max-response-time",
@@ -152,6 +185,17 @@ class ApiContractRunner:
                     )
             except Exception as exc:
                 log.error("api_contract_runner.subprocess_error", run_id=str(test_run_id), error=str(exc))
+            finally:
+                if os.path.exists(temp_spec_path):
+                    try:
+                        os.unlink(temp_spec_path)
+                    except Exception as cleanup_exc:
+                        log.warning(
+                            "api_contract_runner.cleanup_failed",
+                            run_id=str(test_run_id),
+                            path=temp_spec_path,
+                            error=str(cleanup_exc),
+                        )
 
         _task = asyncio.create_task(_run_and_callback())
         _background_tasks.add(_task)
@@ -199,7 +243,9 @@ class ApiContractRunner:
             ]
         )
 
-        response = await client.run_job(name=job_name, overrides=overrides)
+        response = await client.run_job(
+            request=run_v2.RunJobRequest(name=job_name, overrides=overrides),
+        )
         op_meta = response.metadata
         execution_name = (
             op_meta.name if op_meta else f"{job_name}/executions/{test_run_id}"

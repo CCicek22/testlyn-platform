@@ -132,7 +132,9 @@ class A11yRunner:
             ]
         )
 
-        response = await client.run_job(name=job_name, overrides=overrides)
+        response = await client.run_job(
+            request=run_v2.RunJobRequest(name=job_name, overrides=overrides),
+        )
         op_meta = response.metadata
         execution_name = (
             op_meta.name if op_meta else f"{job_name}/executions/{test_run_id}"
