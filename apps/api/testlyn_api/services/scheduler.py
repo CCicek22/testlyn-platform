@@ -77,7 +77,11 @@ async def create_schedule(test_id: str, cron: str, tz: str, *, org_id: str) -> S
     parent = f"projects/{project}/locations/{location}"
     job_name = _job_name(test_id, handle_id)
 
-    target_url = f"{settings.api_base_url}/v1/tests/{test_id}/runs"
+    # Hit the internal run endpoint guarded by X-Internal-Token. Scheduler HTTP
+    # targets can't carry a Firebase bearer + RBAC, so the user-facing
+    # /v1/tests/{id}/runs would 401 every trigger. The internal path derives org
+    # from the test row and is authed by the shared secret.
+    target_url = f"{settings.api_base_url}/v1/internal/tests/{test_id}/runs"
     job = scheduler_v1.Job(
         name=job_name,
         schedule=cron,
@@ -85,6 +89,7 @@ async def create_schedule(test_id: str, cron: str, tz: str, *, org_id: str) -> S
         http_target=scheduler_v1.HttpTarget(
             uri=target_url,
             http_method=scheduler_v1.HttpMethod.POST,
+            headers={"X-Internal-Token": settings.internal_token},
         ),
     )
     request = scheduler_v1.CreateJobRequest(parent=parent, job=job)

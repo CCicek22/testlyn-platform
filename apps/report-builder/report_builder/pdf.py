@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,11 +141,20 @@ def _query_bq(run_id: str, bq_client: Any) -> list[dict[str, Any]]:
             GROUP BY run_id, window_start
         ),
         errors AS (
+            -- http_req_failed is a k6 'rate' metric: each observation has
+            -- value 1 (failed) or 0 (passed). The sidecar stores per (window,
+            -- tag_bucket): `count` = total observations (= total requests) and
+            -- `delta` = sum of values (= failure count).  See sidecar spec §6 +
+            -- engine windows.py. The real error fraction for a window is thus
+            -- SUM(failures) / SUM(total_requests), NOT rate_per_sec (which is an
+            -- absolute failures/second rate, not a 0-1 fraction). We aggregate
+            -- across tag buckets before dividing so the fraction is weighted by
+            -- request volume.
             SELECT
                 TIMESTAMP_DIFF(window_start,
                     MIN(window_start) OVER (PARTITION BY run_id),
                     SECOND) AS t,
-                AVG(rate_per_sec) AS error_rate
+                SAFE_DIVIDE(SUM(delta), SUM(count)) AS error_rate
             FROM `testlyn_metrics.samples_1s`
             WHERE run_id = @run_id
               AND metric = 'http_req_failed'
@@ -304,6 +314,13 @@ async def build_pdf(
 
 
 def _count_pdf_pages(pdf_bytes: bytes) -> int:
-    """Count PDF pages by scanning for page object markers."""
-    count = pdf_bytes.count(b"/Type /Page\n") + pdf_bytes.count(b"/Type/Page\n")
+    """Count PDF pages by counting `/Type /Page` leaf objects.
+
+    WeasyPrint output is not reliably newline-delimited, so we match on a word
+    boundary after ``Page`` rather than a trailing ``\\n``. The ``\\b`` also
+    excludes the ``/Type /Pages`` page-tree node (the ``s`` is a word char, so
+    ``Page\\b`` does not match ``Pages``). Optional whitespace between ``/Type``
+    and ``/Page`` covers both ``/Type /Page`` and ``/Type/Page`` spellings.
+    """
+    count = len(re.findall(rb"/Type\s*/Page\b", pdf_bytes))
     return max(count, 1)

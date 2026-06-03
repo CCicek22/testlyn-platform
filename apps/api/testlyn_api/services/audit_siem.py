@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -104,6 +105,53 @@ async def _post_with_retry(
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
+
+async def active_sinks_for_org(
+    org_id: uuid.UUID,
+    session: AsyncSession,
+) -> list[AuditSiemSink]:
+    """Return the active SIEM sinks configured for an org (empty if none)."""
+    result = await session.execute(
+        select(AuditSiemSink).where(
+            AuditSiemSink.org_id == org_id,
+            AuditSiemSink.active.is_(True),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def _dispatch_safely(sink: AuditSiemSink, event: AuditLog) -> None:
+    """Run export_event, isolating any failure so it cannot propagate."""
+    try:
+        await export_event(sink, event)
+    except Exception as exc:  # noqa: BLE001 — isolate one sink from the rest
+        log.error(
+            "audit_siem.dispatch_failed",
+            sink_id=str(sink.id),
+            event_id=str(event.id),
+            error=str(exc),
+        )
+
+
+def dispatch_event_background(
+    sinks: list[AuditSiemSink],
+    event: AuditLog,
+) -> None:
+    """Fire-and-forget delivery of one audit event to each active sink.
+
+    Each delivery runs in its own detached task so a slow or failing SIEM
+    endpoint never blocks the request hot-path or breaks a sibling sink.
+    Caller is responsible for the cheap "any sinks?" check before invoking.
+    """
+    for sink in sinks:
+        task = asyncio.create_task(_dispatch_safely(sink, event))
+        _BACKGROUND_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
+# Strong refs so fire-and-forget tasks aren't GC'd mid-flight.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 async def export_event(sink: AuditSiemSink, event: AuditLog) -> None:

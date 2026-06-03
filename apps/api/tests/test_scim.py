@@ -13,6 +13,7 @@ from testlyn_api.models.user import User
 from testlyn_api.services.scim import (
     SCIM_LIST_SCHEMA,
     SCIM_USER_SCHEMA,
+    ScimConflict,
     scim_create_user,
     scim_delete_user,
     scim_error,
@@ -102,6 +103,8 @@ async def test_scim_list_users_returns_members(db_session: AsyncSession) -> None
     assert result["totalResults"] == 1
     assert len(result["Resources"]) == 1
     assert result["Resources"][0]["userName"] == "bob@example.com"
+    # itemsPerPage reflects returned count, not the requested page size (RFC 7644)
+    assert result["itemsPerPage"] == 1
 
 
 @pytest.mark.asyncio
@@ -208,18 +211,19 @@ async def test_scim_create_user_new(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scim_create_user_idempotent(db_session: AsyncSession) -> None:
+async def test_scim_create_user_existing_raises_conflict(db_session: AsyncSession) -> None:
+    """RFC 7644: re-creating an existing org member must raise ScimConflict."""
     org = await _make_org(db_session)
     payload = {
         "userName": "heidi@example.com",
         "name": {"formatted": "Heidi"},
         "externalId": None,
     }
-    r1 = await scim_create_user(db_session, org.id, payload, _BASE_URL)
-    r2 = await scim_create_user(db_session, org.id, payload, _BASE_URL)
-    assert r1["id"] == r2["id"]
+    await scim_create_user(db_session, org.id, payload, _BASE_URL)
+    with pytest.raises(ScimConflict):
+        await scim_create_user(db_session, org.id, payload, _BASE_URL)
 
-    # Only one membership row
+    # Still only one membership row (the conflicting create added nothing)
     members = await db_session.execute(
         select(OrgMember).where(OrgMember.org_id == org.id)
     )
@@ -254,13 +258,17 @@ async def test_scim_replace_user_deactivation_removes_membership(db_session: Asy
     user = await _make_user(db_session, "judy@example.com", "Judy")
     await _add_member(db_session, org.id, user.id)
 
-    await scim_replace_user(
+    result = await scim_replace_user(
         db_session,
         org.id,
         user.id,
         {"active": False},
         _BASE_URL,
     )
+
+    # Response must report active=False so the IdP does not reactivate the user
+    assert result is not None
+    assert result["active"] is False
 
     # Membership removed
     member = await db_session.execute(
@@ -361,6 +369,21 @@ async def test_api_create_and_get_user(client: AsyncClient, dev_org_id: uuid.UUI
     get_resp = await client.get(f"/v2/scim/{dev_org_id}/Users/{user_id}")
     assert get_resp.status_code == 200
     assert get_resp.json()["id"] == user_id
+
+
+@pytest.mark.asyncio
+async def test_api_create_existing_user_conflicts(
+    client: AsyncClient, dev_org_id: uuid.UUID
+) -> None:
+    """POST /Users with an already-provisioned userName returns 409 Conflict."""
+    body = {
+        "userName": f"dup-{uuid.uuid4().hex[:8]}@example.com",
+        "name": {"formatted": "Dup User"},
+    }
+    first = await client.post(f"/v2/scim/{dev_org_id}/Users", json=body)
+    assert first.status_code == 201
+    second = await client.post(f"/v2/scim/{dev_org_id}/Users", json=body)
+    assert second.status_code == 409, second.text
 
 
 @pytest.mark.asyncio

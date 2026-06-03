@@ -103,11 +103,29 @@ import type {
   Project,
   Test,
   TestRun,
+  LiveSample,
   CreateOrgRequest,
   CreateProjectRequest,
   CreateTestRequest,
   PatchTestRequest,
 } from "@testlyn/shared";
+
+/**
+ * Wire shape of one element from `GET /v1/runs/{id}/samples`.
+ *
+ * This is NOT identical to the local `LiveSample` (SSE) type: the historical
+ * endpoint uses `p95_duration_ms` / `vus`, has no `p50` / `run_id` /
+ * `metric_name`, and `ts` / `p95_duration_ms` may be null. We map it to
+ * `LiveSample` so the chart + stat cards (which only read p95/error_rate/
+ * vu_count/ts) can consume it unchanged. `p50` is genuinely unavailable from
+ * this endpoint, so it is mapped to NaN and the p50 stat card guards on it.
+ */
+interface RunSampleWire {
+  ts: string | null;
+  p95_duration_ms: number | null;
+  error_rate: number;
+  vus: number;
+}
 
 // ─── Audit types (inline until shared-types is regenerated from OpenAPI) ─────
 
@@ -221,6 +239,21 @@ export const api = {
       request<TestRun[]>(`/v1/runs?product=${product}&limit=${limit}`),
     summary: (id: string, product: string) =>
       request<unknown>(`/v1/runs/${id}/summary?product=${product}`),
+    samples: async (id: string, product: string): Promise<LiveSample[]> => {
+      const rows = await request<RunSampleWire[]>(
+        `/v1/runs/${id}/samples?product=${product}`
+      );
+      return rows.map((r) => ({
+        ts: r.ts ?? "",
+        run_id: id,
+        metric_name: "http_req_duration",
+        p95: r.p95_duration_ms ?? 0,
+        // Endpoint provides no p50; NaN sentinel — p50 stat card guards on it.
+        p50: Number.NaN,
+        error_rate: r.error_rate,
+        vu_count: r.vus,
+      }));
+    },
     cancel: (id: string) =>
       request<void>(`/v1/runs/${id}/cancel`, { method: "POST" }),
     streamUrl: (id: string) => `${BASE_URL}/v1/runs/${id}/stream`,

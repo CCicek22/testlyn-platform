@@ -254,3 +254,66 @@ async def test_record_usage_increments(db_session: AsyncSession) -> None:
     )
     record = result.scalar_one()
     assert record.runs_count == 2
+
+
+@pytest.mark.asyncio
+async def test_release_usage_reverses_recorded_run(db_session: AsyncSession) -> None:
+    """release_usage decrements a previously recorded run back to 0."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    org = _make_org("free")
+    db_session.add(org)
+    await db_session.flush()
+
+    run = await _make_run(db_session, org)
+    db_session.add(run)
+    await db_session.flush()
+
+    quota = QuotaService(db_session)
+    await quota.record_usage(org, run)
+    await quota.release_usage(org, run)
+    await db_session.flush()
+
+    month = datetime.now(UTC).strftime("%Y-%m")
+    record = (
+        await db_session.execute(
+            select(UsageRecord).where(
+                UsageRecord.org_id == org.id, UsageRecord.month == month
+            )
+        )
+    ).scalar_one()
+    assert record.runs_count == 0
+
+
+@pytest.mark.asyncio
+async def test_release_usage_idempotent_floors_at_zero(db_session: AsyncSession) -> None:
+    """Calling release_usage more times than record_usage never goes negative."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    org = _make_org("free")
+    db_session.add(org)
+    await db_session.flush()
+
+    run = await _make_run(db_session, org)
+    db_session.add(run)
+    await db_session.flush()
+
+    quota = QuotaService(db_session)
+    await quota.record_usage(org, run)
+    await quota.release_usage(org, run)
+    await quota.release_usage(org, run)  # second release is a no-op
+    await db_session.flush()
+
+    month = datetime.now(UTC).strftime("%Y-%m")
+    record = (
+        await db_session.execute(
+            select(UsageRecord).where(
+                UsageRecord.org_id == org.id, UsageRecord.month == month
+            )
+        )
+    ).scalar_one()
+    assert record.runs_count == 0

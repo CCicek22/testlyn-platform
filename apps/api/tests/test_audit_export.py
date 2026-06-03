@@ -178,6 +178,80 @@ async def test_audit_log_pagination_distinct_timestamps_no_dupes(
 
 
 @pytest.mark.asyncio
+async def test_stale_cursor_returns_400(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_user_id: uuid.UUID,
+) -> None:
+    """A cursor id that doesn't resolve within the org must 400, not silently
+    restart pagination from page 1."""
+    org_id = await _create_org(client, "StaleCursorOrg")
+    await _set_role(db_session, org_id, dev_user_id, "admin")
+    await _seed_audit_rows(db_session, org_id, 2)
+
+    resp = await client.get(f"/v1/orgs/{org_id}/audit-log?cursor={uuid.uuid4()}")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_cross_org_cursor_returns_400(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_user_id: uuid.UUID,
+) -> None:
+    """A valid cursor id belonging to a DIFFERENT org must 400 — the cursor
+    lookup is org-scoped."""
+    org_a = await _create_org(client, "CursorOrgA")
+    org_b = await _create_org(client, "CursorOrgB")
+    await _set_role(db_session, org_a, dev_user_id, "admin")
+    await _set_role(db_session, org_b, dev_user_id, "admin")
+    rows_b = await _seed_audit_rows(db_session, org_b, 2)
+
+    # Use org_b's row id as a cursor against org_a → must reject, not page-1.
+    resp = await client.get(f"/v1/orgs/{org_a}/audit-log?cursor={rows_b[0].id}")
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_export_emits_all_rows_past_max_limit(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    dev_user_id: uuid.UUID,
+    monkeypatch,
+) -> None:
+    """Export must paginate through the full keyset, not cap at one page, and
+    must not emit the extra limit+1 keyset row.
+
+    Shrink _MAX_LIMIT so a small seed crosses the page boundary.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    import testlyn_api.routers.audit as audit_mod
+
+    monkeypatch.setattr(audit_mod, "_MAX_LIMIT", 2)
+
+    org_id = await _create_org(client, "ExportAllOrg")
+    await _set_role(db_session, org_id, dev_user_id, "admin")
+    rows = await _seed_audit_rows(db_session, org_id, 5)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    for i, row in enumerate(rows):
+        await db_session.execute(
+            update(AuditLog)
+            .where(AuditLog.id == row.id)
+            .values(created_at=base + timedelta(minutes=i))
+        )
+    await db_session.commit()
+
+    resp = await client.get(f"/v1/orgs/{org_id}/audit-log.json")
+    assert resp.status_code == 200
+    data = json.loads(resp.text)
+    ids = [d["id"] for d in data]
+    assert len(ids) == 5, f"expected all 5 rows, got {len(ids)}"
+    assert len(set(ids)) == 5, "duplicate or extra (limit+1) rows in export"
+    assert set(ids) == {str(r.id) for r in rows}
+
+
+@pytest.mark.asyncio
 async def test_member_blocked_from_audit_log(
     client: AsyncClient,
     db_session: AsyncSession,

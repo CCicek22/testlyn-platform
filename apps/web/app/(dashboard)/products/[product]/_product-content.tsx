@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
@@ -11,7 +10,6 @@ import { useAuth } from "@/components/auth/auth-provider";
 import type { TestRun, MeResponse } from "@testlyn/shared";
 
 export function ProductContent({ product }: { product: Product }) {
-  const router = useRouter();
   const { user } = useAuth();
   const meta = getProduct(product);
 
@@ -57,21 +55,23 @@ export function ProductContent({ product }: { product: Product }) {
             </div>
           </div>
 
-          <Button
-            onClick={() => router.push("/tests/new")}
-            aria-label={`Create new ${meta.label} test`}
-          >
-            <svg
-              className="mr-2 h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            New test
+          {/* A test belongs to a project; this product overview has no project
+              context, so route to project selection rather than /tests/new
+              with no ?project= (which dead-ends the create-test flow). */}
+          <Button asChild aria-label={`Create new ${meta.label} test`}>
+            <Link href="/projects">
+              <svg
+                className="mr-2 h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              New test
+            </Link>
           </Button>
         </div>
       </div>

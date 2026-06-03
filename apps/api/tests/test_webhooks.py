@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import socket
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -319,6 +320,54 @@ async def test_dispatcher_fire_creates_delivery(db_session: AsyncSession) -> Non
             ids = await dispatcher.fire(org_id, "test.completed", {"run_id": "r1"})
 
     assert len(ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_fire_commits_before_scheduling(
+    db_session: AsyncSession,
+) -> None:
+    """Regression: fire() must COMMIT delivery rows before scheduling background
+    delivery. _deliver_standalone opens its own session; if the row is only
+    flushed (not committed) the standalone session sees None and silently drops
+    the delivery. We capture the delivery_id handed to the background task and
+    assert that, at schedule time, a *separate* session can already read it.
+    """
+    org_id = await _seed_org(db_session)
+    ep = WebhookEndpoint(
+        org_id=org_id,
+        url="https://example.com/hook",
+        secret="s",
+        events=["test.completed"],
+        active=True,
+    )
+    db_session.add(ep)
+    await db_session.commit()
+
+    # The race is purely about ordering: was the producer session committed at
+    # the moment the background task is scheduled? A standalone session (as used
+    # by _deliver_standalone) can only see the row if commit already happened.
+    # We capture, at create_task() time, whether the producer session still has
+    # an open (uncommitted) transaction — pre-fix it does (commit comes after),
+    # post-fix it does not.
+    open_txn_at_schedule: list[bool] = []
+
+    def _capture(coro: object) -> None:
+        open_txn_at_schedule.append(db_session.in_transaction())
+        if inspect.iscoroutine(coro):
+            coro.close()  # don't actually deliver
+
+    dispatcher = WebhookDispatcher(db_session)
+    with patch(
+        "testlyn_api.services.webhooks._deliver_standalone", new=AsyncMock()
+    ), patch("asyncio.create_task", new=MagicMock(side_effect=_capture)):
+        ids = await dispatcher.fire(org_id, "test.completed", {"run_id": "r1"})
+
+    assert len(ids) == 1
+    # A delivery WAS scheduled (vs. silently dropped) ...
+    assert open_txn_at_schedule == [False], (
+        "producer session still in an uncommitted transaction when the "
+        "background delivery was scheduled → standalone session would see None"
+    )
 
 
 # ─── RBAC: webhook admin requires admin for mutations (finding #5) ────────────

@@ -120,6 +120,29 @@ def _build_filter(
     return clauses
 
 
+async def _resolve_cursor(
+    session: AsyncSession, org_id: uuid.UUID, cursor: uuid.UUID
+) -> datetime:
+    """Resolve a cursor id to its created_at, scoped to org_id.
+
+    Raises 400 if the cursor does not resolve within this org (stale, deleted,
+    or cross-org). Falling through to a None cursor would silently drop the
+    keyset clause and restart pagination from page 1 — producing duplicate
+    pages and client loops — so an unresolved cursor is a hard error.
+    """
+    cursor_created_at = await session.scalar(
+        select(AuditLog.created_at).where(
+            AuditLog.id == cursor, AuditLog.org_id == org_id
+        )
+    )
+    if cursor_created_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired cursor",
+        )
+    return cursor_created_at
+
+
 async def _fetch_page(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -132,12 +155,11 @@ async def _fetch_page(
     limit: int,
 ) -> list[AuditLog]:
     # Resolve the cursor row's created_at so the keyset comparison can use the
-    # full (created_at, id) ordering key.
+    # full (created_at, id) ordering key. Scoped to org_id; raises 400 if the
+    # cursor is unresolvable.
     cursor_created_at: datetime | None = None
     if cursor is not None:
-        cursor_created_at = await session.scalar(
-            select(AuditLog.created_at).where(AuditLog.id == cursor)
-        )
+        cursor_created_at = await _resolve_cursor(session, org_id, cursor)
 
     clauses = _build_filter(
         org_id,
@@ -156,6 +178,42 @@ async def _fetch_page(
     )
     result = await session.execute(q)
     return list(result.scalars().all())
+
+
+async def _iter_all_rows(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    action: str | None,
+    actor_id: uuid.UUID | None,
+    from_dt: datetime | None,
+    to_dt: datetime | None,
+) -> list[AuditLog]:
+    """Page through the full keyset for an export — ALL matching rows, not a
+    silent single-page cap. Walks (created_at DESC, id DESC) in _MAX_LIMIT
+    batches until exhausted.
+    """
+    out: list[AuditLog] = []
+    cursor: uuid.UUID | None = None
+    while True:
+        rows = await _fetch_page(
+            session,
+            org_id,
+            action=action,
+            actor_id=actor_id,
+            from_dt=from_dt,
+            to_dt=to_dt,
+            cursor=cursor,
+            limit=_MAX_LIMIT,
+        )
+        has_more = len(rows) > _MAX_LIMIT
+        if has_more:
+            rows = rows[:_MAX_LIMIT]
+        out.extend(rows)
+        if not has_more:
+            break
+        cursor = rows[-1].id
+    return out
 
 
 # ── Audit log list ─────────────────────────────────────────────────────────────
@@ -214,15 +272,13 @@ async def export_audit_csv(
     from_dt: datetime | None = Query(default=None, alias="from_dt"),
     to_dt: datetime | None = Query(default=None, alias="to_dt"),
 ) -> StreamingResponse:
-    rows = await _fetch_page(
+    rows = await _iter_all_rows(
         session,
         org_id,
         action=action,
         actor_id=actor_id,
         from_dt=from_dt,
         to_dt=to_dt,
-        cursor=None,
-        limit=_MAX_LIMIT,
     )
 
     def _generate() -> Any:
@@ -266,15 +322,13 @@ async def export_audit_json(
     from_dt: datetime | None = Query(default=None, alias="from_dt"),
     to_dt: datetime | None = Query(default=None, alias="to_dt"),
 ) -> StreamingResponse:
-    rows = await _fetch_page(
+    rows = await _iter_all_rows(
         session,
         org_id,
         action=action,
         actor_id=actor_id,
         from_dt=from_dt,
         to_dt=to_dt,
-        cursor=None,
-        limit=_MAX_LIMIT,
     )
     data = [AuditLogOut.model_validate(r).model_dump(mode="json") for r in rows]
 

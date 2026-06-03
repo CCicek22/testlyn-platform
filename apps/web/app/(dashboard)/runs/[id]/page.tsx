@@ -11,6 +11,19 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { TestRun, LiveSample, SSEEventPayload, RunState } from "@testlyn/shared";
 
+const TERMINAL_STATES: ReadonlySet<RunState> = new Set([
+  "done",
+  "error",
+  "cancelled",
+]);
+
+interface RunSummary {
+  run_id: string;
+  summary_uri: string | null;
+  state: RunState;
+  error_reason: string | null;
+}
+
 const STATE_CONFIG: Record<
   RunState,
   { label: string; color: string; dotColor: string }
@@ -95,6 +108,35 @@ export default function RunPage() {
   // Effective state: SSE state overrides polled state (faster)
   const effectiveState: RunState = liveState ?? run?.state ?? "queued";
 
+  const isTerminal = TERMINAL_STATES.has(effectiveState);
+
+  // For terminal runs opened directly from the run list there is no live SSE
+  // stream, so the in-memory `samples` array stays empty. Fetch the persisted
+  // run summary so the page reflects the real final state / error instead of
+  // hanging on "Waiting for samples…".
+  const { data: summary } = useQuery<RunSummary>({
+    queryKey: ["run-summary", runId],
+    queryFn: () =>
+      api.runs.summary(runId, run?.product ?? "load") as Promise<RunSummary>,
+    enabled: !!runId && !!run && isTerminal && samples.length === 0,
+  });
+
+  // Historical metrics for terminal runs with no live SSE samples. Returns the
+  // same LiveSample[] shape the chart + stat cards consume, sourced from the
+  // persisted BigQuery rows instead of the live stream.
+  const { data: historicalSamples } = useQuery<LiveSample[]>({
+    queryKey: ["run-samples", runId],
+    queryFn: () => api.runs.samples(runId, run?.product ?? "load"),
+    enabled: !!runId && !!run && isTerminal && samples.length === 0,
+  });
+
+  // Unified sample source: live SSE samples while running, persisted samples
+  // when opening a finished run cold. The chart, stat cards, and summary all
+  // derive from this single array.
+  const isHistorical = samples.length === 0 && (historicalSamples?.length ?? 0) > 0;
+  const effectiveSamples: LiveSample[] =
+    samples.length > 0 ? samples : historicalSamples ?? [];
+
   const streamUrl =
     run && (effectiveState === "running" || effectiveState === "queued")
       ? api.runs.streamUrl(runId)
@@ -139,7 +181,7 @@ export default function RunPage() {
   });
 
   // Latest sample metrics for stat cards
-  const latestSample = samples[samples.length - 1];
+  const latestSample = effectiveSamples[effectiveSamples.length - 1];
 
   if (runError) {
     return (
@@ -220,8 +262,12 @@ export default function RunPage() {
         />
         <StatCard
           label="p50 latency"
-          value={latestSample ? Math.round(latestSample.p50) : "—"}
-          unit={latestSample ? "ms" : undefined}
+          value={
+            latestSample && Number.isFinite(latestSample.p50)
+              ? Math.round(latestSample.p50)
+              : "—"
+          }
+          unit={latestSample && Number.isFinite(latestSample.p50) ? "ms" : undefined}
         />
         <StatCard
           label="Error rate"
@@ -237,46 +283,66 @@ export default function RunPage() {
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium text-zinc-300">
-            Live latency
+            {isHistorical ? "Latency" : "Live latency"}
             <span className="ml-2 text-xs font-normal text-zinc-500">
-              Last 60 seconds · 1s resolution
+              {isHistorical ? "Full run · 1s resolution" : "Last 60 seconds · 1s resolution"}
             </span>
           </h2>
           <span className="text-xs text-zinc-500">
-            {samples.length} sample{samples.length !== 1 ? "s" : ""}
+            {effectiveSamples.length} sample
+            {effectiveSamples.length !== 1 ? "s" : ""}
           </span>
         </div>
-        <LiveLatencyChart samples={samples} windowSize={60} />
+        <LiveLatencyChart
+          samples={effectiveSamples}
+          windowSize={isHistorical ? effectiveSamples.length : 60}
+        />
       </div>
 
       {/* Summary (post-run) */}
-      {(effectiveState === "done" || effectiveState === "error" || effectiveState === "cancelled") &&
-        samples.length > 0 && (
-          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-            <h2 className="mb-3 text-sm font-medium text-zinc-300">Run summary</h2>
+      {isTerminal && (
+        <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+          <h2 className="mb-3 text-sm font-medium text-zinc-300">Run summary</h2>
+
+          {effectiveSamples.length > 0 ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <StatCard
                 label="Max p95"
-                value={Math.round(Math.max(...samples.map((s) => s.p95)))}
+                value={Math.round(Math.max(...effectiveSamples.map((s) => s.p95)))}
                 unit="ms"
               />
               <StatCard
                 label="Avg p95"
                 value={Math.round(
-                  samples.reduce((acc, s) => acc + s.p95, 0) / samples.length
+                  effectiveSamples.reduce((acc, s) => acc + s.p95, 0) /
+                    effectiveSamples.length
                 )}
                 unit="ms"
               />
               <StatCard
                 label="Peak VUs"
-                value={Math.max(...samples.map((s) => s.vu_count))}
+                value={Math.max(...effectiveSamples.map((s) => s.vu_count))}
               />
             </div>
-            <p className="mt-4 text-xs text-zinc-500">
-              Detailed report generation available in Phase 2 roadmap.
+          ) : (
+            <p className="text-sm text-zinc-400">
+              {effectiveState === "error"
+                ? `Run failed${
+                    summary?.error_reason ?? run?.error_reason
+                      ? `: ${summary?.error_reason ?? run?.error_reason}`
+                      : "."
+                  }`
+                : effectiveState === "cancelled"
+                  ? "Run was cancelled."
+                  : "Run completed."}
             </p>
-          </div>
-        )}
+          )}
+
+          <p className="mt-4 text-xs text-zinc-500">
+            Detailed report generation available in Phase 2 roadmap.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

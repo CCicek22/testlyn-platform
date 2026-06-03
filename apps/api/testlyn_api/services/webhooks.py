@@ -92,7 +92,10 @@ class WebhookDispatcher:
         )
         endpoints = result.scalars().all()
 
-        delivery_ids: list[uuid.UUID] = []
+        # Build delivery rows first; capture the target endpoint coords so we can
+        # schedule background delivery AFTER the commit (the standalone task opens
+        # its own session and must be able to read the committed row).
+        pending: list[tuple[uuid.UUID, str, str]] = []  # (delivery_id, url, secret)
         for ep in endpoints:
             if event_type not in (ep.events or []):
                 continue
@@ -104,20 +107,25 @@ class WebhookDispatcher:
             )
             self._session.add(delivery)
             await self._session.flush()
-            delivery_ids.append(delivery.id)
-            # Kick off delivery in the background; session is already flushed.
-            asyncio.create_task(  # noqa: RUF006
-                _deliver_standalone(delivery.id, ep.url, ep.secret, payload, event_type)
-            )
+            pending.append((delivery.id, ep.url, ep.secret))
 
-        if delivery_ids:
-            await self._session.commit()
-            log.info(
-                "webhooks.fired",
-                event_type=event_type,
-                org_id=str(org_id),
-                count=len(delivery_ids),
+        delivery_ids = [d_id for d_id, _, _ in pending]
+        if not pending:
+            return delivery_ids
+
+        # Commit BEFORE scheduling: _deliver_standalone uses a separate session
+        # and would not see uncommitted rows (would silently drop the delivery).
+        await self._session.commit()
+        for delivery_id, url, secret in pending:
+            asyncio.create_task(  # noqa: RUF006
+                _deliver_standalone(delivery_id, url, secret, payload, event_type)
             )
+        log.info(
+            "webhooks.fired",
+            event_type=event_type,
+            org_id=str(org_id),
+            count=len(delivery_ids),
+        )
         return delivery_ids
 
     async def deliver(self, delivery_id: uuid.UUID) -> bool:

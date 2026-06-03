@@ -9,7 +9,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from sqlalchemy import select
 
 from testlyn_api.core.runner_registry import RUNNERS
-from testlyn_api.deps import SessionDep
+from testlyn_api.deps import AuditDep, SessionDep
 from testlyn_api.models.project import Project
 from testlyn_api.models.test import Test
 from testlyn_api.models.test_run import TestRun
@@ -41,6 +41,55 @@ def _verify_internal_token(x_internal_token: str | None) -> None:
         )
     if not x_internal_token or not secrets.compare_digest(x_internal_token, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal token")
+
+
+@router.post(
+    "/tests/{test_id}/runs",
+    response_model=RunOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_internal_run(
+    test_id: uuid.UUID,
+    session: SessionDep,
+    audit: AuditDep,
+    x_internal_token: str | None = Header(default=None),
+) -> RunOut:
+    """Create + enqueue a run for ``test_id`` without a user context.
+
+    Authorized by the shared X-Internal-Token (same gate as the other
+    ``/v1/internal/*`` endpoints). Used by Cloud Scheduler triggers — the
+    user-facing ``POST /v1/tests/{id}/runs`` requires a Firebase bearer + RBAC
+    which a Scheduler HTTP target can't supply. Org/quota/usage are resolved
+    from the test row inside ``create_run_for_test``.
+    """
+    from testlyn_api.services.runs import create_run_for_test
+
+    _verify_internal_token(x_internal_token)
+
+    test_result = await session.execute(select(Test).where(Test.id == test_id))
+    test = test_result.scalar_one_or_none()
+    if test is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
+
+    run, org = await create_run_for_test(session, test, triggered_by=None)
+
+    audit.set_org(org.id)
+    await audit.write(
+        action="test_run.created",
+        resource_type="test_run",
+        resource_id=run.id,
+        after={
+            "test_id": str(test.id),
+            "state": run.state,
+            "product": run.product,
+            "trigger": "scheduler",
+        },
+        org_id=org.id,
+    )
+    await session.commit()
+
+    log.info("run.created_internal", run_id=str(run.id), test_id=str(test_id))
+    return RunOut.from_run_and_test(run, test)
 
 
 @router.post("/runs/{run_id}/start", response_model=RunOut)
@@ -106,6 +155,14 @@ async def start_run(
         run.state = "failed"
         run.error_reason = str(exc)
         run.finished_at = datetime.now(tz=UTC)
+        # Launch never happened — reverse the usage recorded at create_run time
+        # so a failed launch doesn't inflate the org's monthly quota.
+        from testlyn_api.models.org import Organization
+        from testlyn_api.services.quota import QuotaService
+
+        org = await session.get(Organization, project.org_id)
+        if org is not None:
+            await QuotaService(session).release_usage(org, run)
 
     await session.commit()
     await session.refresh(run)

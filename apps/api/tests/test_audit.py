@@ -178,6 +178,154 @@ async def test_audit_service_skips_without_org(db_session: AsyncSession) -> None
     assert result.scalars().all() == []
 
 
+# ---------------------------------------------------------------------------
+# SIEM export wiring — audit write fans out to active sinks
+# ---------------------------------------------------------------------------
+
+
+async def _drain_siem_tasks() -> None:
+    """Await any fire-and-forget SIEM dispatch tasks spawned by a write."""
+    import asyncio
+
+    from testlyn_api.services import audit_siem
+
+    while audit_siem._BACKGROUND_TASKS:
+        await asyncio.gather(*audit_siem._BACKGROUND_TASKS, return_exceptions=True)
+
+
+def _make_service(db_session: AsyncSession, org_id: uuid.UUID):
+    from testlyn_api.core.audit import AuditContext, AuditService
+
+    ctx = AuditContext(
+        ip=None,
+        user_agent=None,
+        actor_user_id=None,
+        org_id=org_id,
+        _session=db_session,
+    )
+    return AuditService(ctx)
+
+
+async def _seed_sink(db_session: AsyncSession, org_id: uuid.UUID, *, active: bool = True):
+    from testlyn_api.models.audit_siem_sink import AuditSiemSink
+
+    sink = AuditSiemSink(
+        org_id=org_id,
+        kind="generic_https",
+        config={"url": "https://siem.example.com/ingest"},
+        active=active,
+    )
+    db_session.add(sink)
+    await db_session.flush()
+    return sink
+
+
+@pytest.mark.asyncio
+async def test_audit_write_dispatches_to_active_sink(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    from testlyn_api.services import audit_siem
+
+    org = Organization(name="SiemOrg", slug=f"siem-{uuid.uuid4().hex[:6]}")
+    db_session.add(org)
+    await db_session.flush()
+    sink = await _seed_sink(db_session, org.id)
+
+    calls: list[tuple] = []
+
+    async def _capture(s, e):
+        calls.append((s, e))
+
+    monkeypatch.setattr(audit_siem, "export_event", _capture)
+
+    svc = _make_service(db_session, org.id)
+    await svc.write(action="org.created", resource_type="organization")
+    await _drain_siem_tasks()
+
+    assert len(calls) == 1
+    called_sink, called_event = calls[0]
+    assert called_sink.id == sink.id
+    assert called_event.action == "org.created"
+    assert called_event.org_id == org.id
+
+
+@pytest.mark.asyncio
+async def test_audit_write_no_sink_no_dispatch(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    from testlyn_api.services import audit_siem
+
+    org = Organization(name="NoSinkOrg", slug=f"nosink-{uuid.uuid4().hex[:6]}")
+    db_session.add(org)
+    await db_session.flush()
+
+    calls: list[tuple] = []
+
+    async def _capture(s, e):
+        calls.append((s, e))
+
+    monkeypatch.setattr(audit_siem, "export_event", _capture)
+
+    svc = _make_service(db_session, org.id)
+    await svc.write(action="org.created", resource_type="organization")
+    await _drain_siem_tasks()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_audit_write_inactive_sink_no_dispatch(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    from testlyn_api.services import audit_siem
+
+    org = Organization(name="InactiveSinkOrg", slug=f"inact-{uuid.uuid4().hex[:6]}")
+    db_session.add(org)
+    await db_session.flush()
+    await _seed_sink(db_session, org.id, active=False)
+
+    calls: list[tuple] = []
+
+    async def _capture(s, e):
+        calls.append((s, e))
+
+    monkeypatch.setattr(audit_siem, "export_event", _capture)
+
+    svc = _make_service(db_session, org.id)
+    await svc.write(action="org.created", resource_type="organization")
+    await _drain_siem_tasks()
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_audit_write_survives_sink_failure(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """A sink whose export_event raises must NOT fail the audit write."""
+    from testlyn_api.services import audit_siem
+
+    org = Organization(name="FailSinkOrg", slug=f"fail-{uuid.uuid4().hex[:6]}")
+    db_session.add(org)
+    await db_session.flush()
+    await _seed_sink(db_session, org.id)
+
+    async def _boom(s, e):
+        raise RuntimeError("SIEM down")
+
+    monkeypatch.setattr(audit_siem, "export_event", _boom)
+
+    svc = _make_service(db_session, org.id)
+    # Must not raise despite the failing sink.
+    await svc.write(action="org.created", resource_type="organization")
+    await _drain_siem_tasks()
+
+    # Audit row still committed.
+    await db_session.flush()
+    result = await db_session.execute(select(AuditLog).where(AuditLog.org_id == org.id))
+    assert len(result.scalars().all()) == 1
+
+
 @pytest.mark.asyncio
 async def test_quota_exceeded_blocks_run(
     client: AsyncClient,

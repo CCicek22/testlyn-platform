@@ -138,7 +138,13 @@ async def create_scim_user(
     _assert_scim_enabled()
     _verify_bearer(authorization, org_id)
     payload = await request.json()
-    data = await scim_svc.scim_create_user(session, org_id, payload, _base_url(request))
+    try:
+        data = await scim_svc.scim_create_user(session, org_id, payload, _base_url(request))
+    except scim_svc.ScimConflict as exc:
+        return _scim_response(
+            scim_svc.scim_error(status.HTTP_409_CONFLICT, str(exc)),
+            status_code=status.HTTP_409_CONFLICT,
+        )
     return _scim_response(data, status_code=status.HTTP_201_CREATED)
 
 
