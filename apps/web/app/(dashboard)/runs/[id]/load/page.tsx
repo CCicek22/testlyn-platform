@@ -8,25 +8,30 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api-client";
 import { useSSE } from "@/lib/sse";
+import { mapFrameMetrics } from "@/lib/run-stream";
 import { LiveLatencyChart } from "@/components/charts/live-latency-chart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProduct } from "@/lib/products";
-import type { TestRun, LiveSample, SSEEventPayload, RunState } from "@testlyn/shared";
+import type { TestRun, LiveSample, RunStreamFrame, RunState } from "@testlyn/shared";
 
 const PRODUCT = "load";
 const ACCENT = getProduct(PRODUCT).accent;
 
+const TERMINAL_STATES: ReadonlySet<RunState> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
 const STATE_CONFIG: Record<string, { label: string; color: string; dotColor: string }> = {
   queued:    { label: "Queued",    color: "border-zinc-700 bg-zinc-800 text-zinc-400",      dotColor: "bg-zinc-500" },
   running:   { label: "Running",  color: "border-primary/30 bg-primary/10 text-primary",    dotColor: "bg-primary animate-pulse" },
-  done:      { label: "Completed", color: "border-success/30 bg-success/10 text-success",    dotColor: "bg-success" },
   completed: { label: "Completed", color: "border-success/30 bg-success/10 text-success",    dotColor: "bg-success" },
-  error:     { label: "Failed",    color: "border-alert/30 bg-alert/10 text-alert",          dotColor: "bg-alert" },
   failed:    { label: "Failed",    color: "border-alert/30 bg-alert/10 text-alert",          dotColor: "bg-alert" },
   cancelled: { label: "Cancelled", color: "border-zinc-700 bg-zinc-800 text-zinc-400",     dotColor: "bg-zinc-500" },
 };
@@ -75,20 +80,44 @@ export default function LoadRunPage() {
 
   const effectiveState: RunState = liveState ?? run?.state ?? "queued";
 
+  const isTerminal = TERMINAL_STATES.has(effectiveState);
+
+  // Historical metrics for terminal runs with no live SSE samples — same
+  // LiveSample[] shape the chart + stat cards consume, sourced from the
+  // persisted BigQuery rows instead of the live stream.
+  const { data: historicalSamples } = useQuery<LiveSample[]>({
+    queryKey: ["run-samples", runId],
+    queryFn: () => api.runs.samples(runId, PRODUCT),
+    enabled: !!runId && !!run && isTerminal && samples.length === 0,
+  });
+
+  // Unified sample source: live SSE samples while running, persisted samples
+  // when opening a finished run cold.
+  const isHistorical = samples.length === 0 && (historicalSamples?.length ?? 0) > 0;
+  const effectiveSamples: LiveSample[] =
+    samples.length > 0 ? samples : historicalSamples ?? [];
+
   const streamUrl =
     run && (effectiveState === "running" || effectiveState === "queued")
       ? api.runs.streamUrl(runId)
       : null;
 
+  // Dedupe set + last-seen state for the SSE stream: each frame re-sends the
+  // last-60s metric window, and every frame carries `state`.
+  const seenTsRef = useRef<Set<string>>(new Set());
+  const lastStreamStateRef = useRef<RunState | null>(null);
+
   const onMessage = useCallback(
-    (payload: SSEEventPayload) => {
-      if (payload.type === "sample") {
-        setSamples((prev) => [...prev, payload.data]);
-      } else if (payload.type === "state") {
-        setLiveState(payload.data.state);
-        void qc.invalidateQueries({ queryKey: ["run", runId] });
-      } else if (payload.type === "done") {
-        setLiveState("done");
+    (frame: RunStreamFrame) => {
+      const fresh = mapFrameMetrics(frame, seenTsRef.current);
+      if (fresh.length > 0) {
+        // Cap to a sliding window of the last hour of 1-Hz samples so memory
+        // stays bounded on long-running tests.
+        setSamples((prev) => [...prev, ...fresh].slice(-3600));
+      }
+      if (frame.state !== lastStreamStateRef.current) {
+        lastStreamStateRef.current = frame.state;
+        setLiveState(frame.state);
         void qc.invalidateQueries({ queryKey: ["run", runId] });
       }
     },
@@ -96,9 +125,16 @@ export default function LoadRunPage() {
   );
 
   const onSSEError = useCallback(() => { setSseError("Live stream disconnected — retrying…"); }, []);
-  const onDone = useCallback(() => { setSseError(null); }, []);
 
-  useSSE<SSEEventPayload>(streamUrl, { onMessage, onError: onSSEError, onDone, enabled: !!streamUrl });
+  // Server sent `event: done` — refetch the run for the final state and clear
+  // a stale non-terminal live state so it can't mask the polled state.
+  const onDone = useCallback(() => {
+    setSseError(null);
+    setLiveState((prev) => (prev && TERMINAL_STATES.has(prev) ? prev : null));
+    void qc.invalidateQueries({ queryKey: ["run", runId] });
+  }, [qc, runId]);
+
+  useSSE<RunStreamFrame>(streamUrl, { onMessage, onError: onSSEError, onDone, enabled: !!streamUrl });
 
   const cancelMutation = useMutation({
     mutationFn: () => api.runs.cancel(runId),
@@ -108,7 +144,7 @@ export default function LoadRunPage() {
     },
   });
 
-  const latestSample = samples[samples.length - 1];
+  const latestSample = effectiveSamples[effectiveSamples.length - 1];
 
   if (runError) {
     return (
@@ -184,7 +220,15 @@ export default function LoadRunPage() {
 
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label="p95 latency" value={latestSample ? Math.round(latestSample.p95) : "—"} unit={latestSample ? "ms" : undefined} />
-          <StatCard label="p50 latency" value={latestSample ? Math.round(latestSample.p50) : "—"} unit={latestSample ? "ms" : undefined} />
+          <StatCard
+            label="p50 latency"
+            value={
+              latestSample && Number.isFinite(latestSample.p50)
+                ? Math.round(latestSample.p50)
+                : "—"
+            }
+            unit={latestSample && Number.isFinite(latestSample.p50) ? "ms" : undefined}
+          />
           <StatCard label="Error rate"  value={latestSample ? `${(latestSample.error_rate * 100).toFixed(1)}%` : "—"} />
           <StatCard label="Active VUs"  value={latestSample ? latestSample.vu_count : run?.config.vus ?? "—"} />
         </div>
@@ -192,21 +236,23 @@ export default function LoadRunPage() {
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium text-zinc-300">
-              Live latency
-              <span className="ml-2 text-xs font-normal text-zinc-500">Last 60 seconds · 1s resolution</span>
+              {isHistorical ? "Latency" : "Live latency"}
+              <span className="ml-2 text-xs font-normal text-zinc-500">
+                {isHistorical ? "Full run · 1s resolution" : "Last 60 seconds · 1s resolution"}
+              </span>
             </h2>
-            <span className="text-xs text-zinc-500">{samples.length} sample{samples.length !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-zinc-500">{effectiveSamples.length} sample{effectiveSamples.length !== 1 ? "s" : ""}</span>
           </div>
-          <LiveLatencyChart samples={samples} windowSize={60} />
+          <LiveLatencyChart samples={effectiveSamples} windowSize={isHistorical ? effectiveSamples.length : 60} />
         </div>
 
-        {(effectiveState === "done" || effectiveState === "error" || effectiveState === "cancelled") && samples.length > 0 && (
+        {isTerminal && effectiveSamples.length > 0 && (
           <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
             <h2 className="mb-3 text-sm font-medium text-zinc-300">Run summary</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <StatCard label="Max p95" value={Math.round(Math.max(...samples.map((s) => s.p95)))} unit="ms" />
-              <StatCard label="Avg p95" value={Math.round(samples.reduce((acc, s) => acc + s.p95, 0) / samples.length)} unit="ms" />
-              <StatCard label="Peak VUs" value={Math.max(...samples.map((s) => s.vu_count))} />
+              <StatCard label="Max p95" value={Math.round(Math.max(...effectiveSamples.map((s) => s.p95)))} unit="ms" />
+              <StatCard label="Avg p95" value={Math.round(effectiveSamples.reduce((acc, s) => acc + s.p95, 0) / effectiveSamples.length)} unit="ms" />
+              <StatCard label="Peak VUs" value={Math.max(...effectiveSamples.map((s) => s.vu_count))} />
             </div>
           </div>
         )}

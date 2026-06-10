@@ -49,10 +49,13 @@ _SUMMARY_AGG_KEYS = (
 )
 
 # Hard-4xx reasons returned by insert_rows_json that signal poison rows.
-# Per BQ docs: 'invalid' = schema mismatch / bad value; 'stopped' = batch
-# aborted because an earlier row failed.  Everything else (timeout, rate
-# limit, backend error) is treated as transient.
-_POISON_REASONS = frozenset({"invalid", "stopped"})
+# Per BQ docs: 'invalid' = schema mismatch / bad value.  'stopped' is NOT
+# poison — it means the row was not attempted because ANOTHER row in the
+# batch was invalid, and it is safe to retry.  (We also pass
+# skip_invalid_rows=True so one bad row can't abort the whole batch.)
+# Everything else (timeout, rate limit, backend error) is treated as
+# transient.
+_POISON_REASONS = frozenset({"invalid"})
 
 
 def _extract_summary_aggregates(
@@ -253,7 +256,11 @@ class BQWriter:
             "summary_json": json.dumps(summary_json) if summary_json else None,
             **aggregates,
         }
-        await self._insert_with_retry([row], table_id=self._cfg.summary_table_id)
+        # kind="runs_summary" so a spooled summary row replays into the
+        # runs_summary table, not samples_1s (where it would poison).
+        await self._insert_with_retry(
+            [row], table_id=self._cfg.summary_table_id, kind="runs_summary"
+        )
 
     async def stats(self) -> dict[str, int]:
         return {
@@ -292,7 +299,13 @@ class BQWriter:
         self._total_rows_sent += len(batch)
         self._total_batches += 1
 
-    async def _insert_with_retry(self, rows: list[dict[str, Any]], *, table_id: str) -> None:
+    async def _insert_with_retry(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        table_id: str,
+        kind: str = "samples_1s",
+    ) -> None:
         try:
             await asyncio.to_thread(self._insert_rows_sync, rows, table_id)
         except _TransientBQError as exc:
@@ -302,7 +315,7 @@ class BQWriter:
                 rows=len(rows),
                 action="spooling",
             )
-            await self._spool.write(rows)
+            await self._spool.write(rows, kind=kind)
             self._total_spool_incidents += 1
         except _PoisonBQError as exc:
             log.error(
@@ -310,7 +323,7 @@ class BQWriter:
                 error=str(exc),
                 rows=len(rows),
             )
-            await self._spool.write(rows, poison=True)
+            await self._spool.write(rows, poison=True, kind=kind)
             self._total_spool_incidents += 1
         except _PartialPoisonError as exc:
             # Split: poison rows go to poison/, surviving rows retry inline.
@@ -320,11 +333,13 @@ class BQWriter:
                 surviving_count=len(exc.surviving_rows),
             )
             if exc.poison_rows:
-                await self._spool.write(exc.poison_rows, poison=True)
+                await self._spool.write(exc.poison_rows, poison=True, kind=kind)
                 self._total_spool_incidents += 1
             if exc.surviving_rows:
                 # Recurse: the surviving subset may itself fail and re-split.
-                await self._insert_with_retry(exc.surviving_rows, table_id=table_id)
+                await self._insert_with_retry(
+                    exc.surviving_rows, table_id=table_id, kind=kind
+                )
 
     @retry(
         retry=retry_if_exception_type(_TransientBQError),
@@ -341,7 +356,12 @@ class BQWriter:
         client = self._get_client()
         row_ids = [_row_insert_id(r) for r in rows]
         try:
-            errors = client.insert_rows_json(table_id, rows, row_ids=row_ids)
+            # skip_invalid_rows=True: insert all valid rows even when some rows
+            # are invalid.  Without it one bad row 'stops' the entire batch and
+            # a 5000-row flush would be lost to poison/ wholesale.
+            errors = client.insert_rows_json(
+                table_id, rows, row_ids=row_ids, skip_invalid_rows=True
+            )
         except GoogleCloudError as exc:
             status = getattr(exc, "code", None)
             if status in _TRANSIENT_CODES or status is None:
@@ -350,14 +370,22 @@ class BQWriter:
 
         if errors:
             # Per BQ docs, `errors` is a list of {index, errors: [{reason, ...}]}.
-            # Split into poison vs surviving rows so we don't infinitely retry
-            # rows that will never succeed (schema mismatch, bad value).
+            # With skip_invalid_rows=True, rows NOT listed in `errors` were
+            # inserted successfully.  Split the errored rows into poison
+            # ('invalid' — will never succeed) vs retriable ('stopped',
+            # timeouts, etc. — safe to retry; insertId dedup absorbs any
+            # double-send).
             poison_idx: set[int] = set()
+            error_idx: set[int] = set()
             for err in errors:
                 idx = err.get("index")
+                if idx is None:
+                    continue
+                error_idx.add(int(idx))
                 reasons = {e.get("reason") for e in (err.get("errors") or [])}
-                if idx is not None and (reasons & _POISON_REASONS):
+                if reasons & _POISON_REASONS:
                     poison_idx.add(int(idx))
+            retriable_idx = error_idx - poison_idx
 
             if poison_idx == set(range(len(rows))):
                 # Every row is poison — short-circuit to the poison branch.
@@ -366,7 +394,7 @@ class BQWriter:
 
             if poison_idx:
                 poison_rows = [rows[i] for i in sorted(poison_idx)]
-                surviving = [r for i, r in enumerate(rows) if i not in poison_idx]
+                surviving = [rows[i] for i in sorted(retriable_idx)]
                 log.warning(
                     "sidecar.batch_partial_poison",
                     poison=len(poison_rows),
@@ -378,7 +406,7 @@ class BQWriter:
                     surviving_rows=surviving,
                 )
 
-            # No row was classified poison → treat the whole batch as transient.
+            # No row was classified poison → retry just the errored rows.
             log.warning("sidecar.batch_failed", errors=errors[:3], action="retry")
             raise _TransientBQError(str(errors))
 
@@ -386,9 +414,12 @@ class BQWriter:
         total = 0
         async for kind, batch in self._spool.drain():
             # Route to the correct BQ table based on the kind discriminator.
-            # Phase 1 only ever spools samples_1s rows; assert to catch drift.
-            assert kind == "samples_1s", f"Unexpected spool kind: {kind!r}"
-            await self._insert_with_retry(batch, table_id=self._cfg.samples_table_id)
+            table_id = (
+                self._cfg.summary_table_id
+                if kind == "runs_summary"
+                else self._cfg.samples_table_id
+            )
+            await self._insert_with_retry(batch, table_id=table_id, kind=kind)
             total += len(batch)
         if total:
             log.info("sidecar.spool_drained", rows=total)

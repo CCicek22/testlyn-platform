@@ -1,26 +1,12 @@
-"use client";
-
-import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import { getProduct } from "@/lib/products";
 import { BarChart3 } from "lucide-react";
 
 const PRODUCT = getProduct("eng_analytics");
 
-async function fetchConnection(runId: string) {
-  const res = await fetch(`/api/v1/products/eng-analytics/connections/${runId}`);
-  return res.json() as Promise<{ code: string; detail: string; available_in: string }>;
-}
-
+// Future-phase placeholder — the backend stub for this product returns 501
+// NOT_IMPLEMENTED, so there is nothing to fetch yet. Static copy mirrors the
+// stub's detail/available_in fields.
 export default function EngAnalyticsRunPage() {
-  const { id } = useParams<{ id: string }>();
-
-  const { data } = useQuery({
-    queryKey: ["eng-analytics-connection", id],
-    queryFn: () => fetchConnection(id),
-    retry: false,
-  });
-
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-6 py-16 text-center">
       <div
@@ -39,11 +25,11 @@ export default function EngAnalyticsRunPage() {
         className="mb-6 inline-block rounded-full px-3 py-0.5 text-xs font-semibold"
         style={{ backgroundColor: `${PRODUCT.accent}22`, color: PRODUCT.accent }}
       >
-        {data?.available_in ?? "Phase 4 GA"}
+        Phase 4 GA
       </span>
 
       <p className="max-w-md text-sm text-zinc-400">
-        {data?.detail ?? "This product is not yet available."}
+        Engineering Analytics is not yet available.
       </p>
     </div>
   );

@@ -116,6 +116,11 @@ class SyntheticDataRunner:
                                 f"{settings.api_base_url}"
                                 f"/v1/internal/runs/{test_run_id}/complete"
                             ),
+                            # Shared secret echoed back on the callback for
+                            # X-Internal-Token gate parity with the load engine.
+                            # Without it, cloud callbacks are rejected with 403
+                            # and the run never completes.
+                            "INTERNAL_TOKEN": settings.internal_token,
                             **env,
                         }.items()
                     ]

@@ -121,9 +121,9 @@ export function useSSE<T>(
       }
 
       if (res.status === 401) {
-        // Refresh token + retry once. getIdToken() pulls a fresh JWT from
-        // Firebase if the cached one is expired.
-        token = await getIdToken();
+        // Force-refresh the token + retry once. Without forceRefresh Firebase
+        // returns the same cached (rejected) JWT and the retry is doomed.
+        token = await getIdToken(true);
         if (!token) {
           stopped = true;
           onErrorRef.current?.(new Error("unauthenticated"));

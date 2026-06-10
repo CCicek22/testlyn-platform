@@ -127,18 +127,26 @@ def _query_bq(run_id: str, bq_client: Any) -> list[dict[str, Any]]:
       t, p50, p95, p99, error_rate, vus
     """
     query = """
-        WITH latency AS (
-            SELECT
-                TIMESTAMP_DIFF(window_start,
-                    MIN(window_start) OVER (PARTITION BY run_id),
-                    SECOND) AS t,
-                AVG(p50) AS p50,
-                AVG(p95) AS p95,
-                AVG(p99) AS p99
+        WITH base AS (
+            -- Shared t=0 epoch for ALL series: the run-wide earliest window
+            -- across every metric. Computing t per-metric (each CTE taking
+            -- its own minimum) gave every series a different zero point, so
+            -- the latency / error / VU curves were misaligned in the PDF.
+            SELECT MIN(window_start) AS t0
             FROM `testlyn_metrics.samples_1s`
             WHERE run_id = @run_id
-              AND metric = 'http_req_duration'
-            GROUP BY run_id, window_start
+        ),
+        latency AS (
+            SELECT
+                TIMESTAMP_DIFF(s.window_start, b.t0, SECOND) AS t,
+                AVG(s.p50) AS p50,
+                AVG(s.p95) AS p95,
+                AVG(s.p99) AS p99
+            FROM `testlyn_metrics.samples_1s` s
+            CROSS JOIN base b
+            WHERE s.run_id = @run_id
+              AND s.metric = 'http_req_duration'
+            GROUP BY t
         ),
         errors AS (
             -- http_req_failed is a k6 'rate' metric: each observation has
@@ -151,25 +159,23 @@ def _query_bq(run_id: str, bq_client: Any) -> list[dict[str, Any]]:
             -- across tag buckets before dividing so the fraction is weighted by
             -- request volume.
             SELECT
-                TIMESTAMP_DIFF(window_start,
-                    MIN(window_start) OVER (PARTITION BY run_id),
-                    SECOND) AS t,
-                SAFE_DIVIDE(SUM(delta), SUM(count)) AS error_rate
-            FROM `testlyn_metrics.samples_1s`
-            WHERE run_id = @run_id
-              AND metric = 'http_req_failed'
-            GROUP BY run_id, window_start
+                TIMESTAMP_DIFF(s.window_start, b.t0, SECOND) AS t,
+                SAFE_DIVIDE(SUM(s.delta), SUM(s.count)) AS error_rate
+            FROM `testlyn_metrics.samples_1s` s
+            CROSS JOIN base b
+            WHERE s.run_id = @run_id
+              AND s.metric = 'http_req_failed'
+            GROUP BY t
         ),
         vus AS (
             SELECT
-                TIMESTAMP_DIFF(window_start,
-                    MIN(window_start) OVER (PARTITION BY run_id),
-                    SECOND) AS t,
-                AVG(delta) AS vus
-            FROM `testlyn_metrics.samples_1s`
-            WHERE run_id = @run_id
-              AND metric = 'vus'
-            GROUP BY run_id, window_start
+                TIMESTAMP_DIFF(s.window_start, b.t0, SECOND) AS t,
+                AVG(s.delta) AS vus
+            FROM `testlyn_metrics.samples_1s` s
+            CROSS JOIN base b
+            WHERE s.run_id = @run_id
+              AND s.metric = 'vus'
+            GROUP BY t
         )
         SELECT
             l.t,

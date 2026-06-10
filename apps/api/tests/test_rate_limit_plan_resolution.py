@@ -9,7 +9,7 @@ test engine) so org_context.resolve_org_and_plan hits the same DB we seed here.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,9 +59,10 @@ async def test_pro_org_gets_pro_limit_not_free(db_session: AsyncSession) -> None
     req = _request_with_bearer()
 
     # Firebase verification returns a verified token carrying the uid (no org_id).
+    # verify_token is async now (runs blocking JWKS I/O off-loop) → AsyncMock.
     with patch(
         "testlyn_api.core.token_verify.verify_token",
-        return_value={"uid": uid, "email": f"{uid}@x.com"},
+        new=AsyncMock(return_value={"uid": uid, "email": f"{uid}@x.com"}),
     ):
         resolved_org, plan = await mw._resolve_identity(req)
 
@@ -78,7 +79,7 @@ async def test_verified_user_without_org_falls_back_to_ip_free(db_session: Async
 
     with patch(
         "testlyn_api.core.token_verify.verify_token",
-        return_value={"uid": "stranger-uid", "email": "s@x.com"},
+        new=AsyncMock(return_value={"uid": "stranger-uid", "email": "s@x.com"}),
     ):
         resolved_org, plan = await mw._resolve_identity(req)
 

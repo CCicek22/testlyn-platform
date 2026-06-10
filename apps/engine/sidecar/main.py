@@ -86,10 +86,17 @@ async def _await_exit_code(
     return _read_exit_code(path)
 
 
-def _read_exit_code(path: str, default: int = 0) -> int:
+# Sentinel for "exit code could not be determined" — file missing AND env
+# unset.  Must be non-zero: defaulting to 0 used to mark runs as 'completed'
+# even when the workload's real outcome was unknown.
+EXIT_CODE_UNKNOWN = -1
+
+
+def _read_exit_code(path: str, default: int = EXIT_CODE_UNKNOWN) -> int:
     """Read the integer exit code the engine entrypoint wrote on workload finish.
 
-    Falls back to the K6_EXIT_CODE env var (legacy path) and then `default`.
+    Falls back to the K6_EXIT_CODE env var (legacy path) and then `default`
+    (EXIT_CODE_UNKNOWN — the run is recorded as 'partial', never 'completed').
     """
     try:
         raw = Path(path).read_text().strip()
@@ -194,7 +201,15 @@ async def main() -> None:
         # (env-var-at-startup race is fixed; see entrypoint.sh).  Poll briefly
         # in case the entrypoint is still flushing it.
         k6_exit = await _await_exit_code(cfg.EXIT_CODE_PATH, log)
-        status = "completed" if k6_exit == 0 else "failed"
+        if k6_exit == 0:
+            status = "completed"
+        elif k6_exit == EXIT_CODE_UNKNOWN:
+            # Exit code undeterminable (no file, no env) — the run may have
+            # succeeded or failed; record 'partial' (allowed by spec §5), never
+            # 'completed'.
+            status = "partial"
+        else:
+            status = "failed"
 
         summary_blob = _read_summary_json(cfg.K6_SUMMARY_PATH)
         if summary_blob is None and cfg.PARSER == "k6":

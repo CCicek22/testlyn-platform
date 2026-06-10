@@ -32,8 +32,11 @@ Clock-skew tolerance
 --------------------
 We hold at most MAX_LATE_WINDOWS=5 concurrent windows per (metric, tag_bucket).
 When a sample arrives for a window that is >MAX_LATE_WINDOWS seconds before the
-newest known window, it is dropped with a warning. Older windows are flushed
-when a sample arrives for a strictly newer window.
+newest known window, it is dropped with a warning. A window is closed (emitted)
+only once it falls MORE than MAX_LATE_WINDOWS behind the newest window — the
+same horizon as the late-sample cutoff — so a tolerated late sample can never
+re-open an already-emitted window. Each (metric, bucket, window) is therefore
+emitted exactly once (plus the final flush_all at EOF).
 """
 
 from __future__ import annotations
@@ -275,12 +278,17 @@ class WindowAggregator:
             )
             return []
 
-        # Flush windows older than the current one for this key
+        # Flush windows that have fallen beyond the late-sample horizon.
+        # IMPORTANT: the close horizon must equal the late-sample cutoff —
+        # closing anything newer would let a still-tolerated late sample
+        # re-create an already-emitted window, producing a duplicate emission
+        # (BQ insertId dedup then silently drops the late data, or past the
+        # dedup horizon double-counts it).
         closed: list[WindowSample] = []
         if key in self._windows:
             for existing_ws_iso in list(self._windows[key].keys()):
                 existing_ws = datetime.fromisoformat(existing_ws_iso)
-                if existing_ws < ws:
+                if existing_ws < cutoff:
                     closed.append(self._close_window(key, existing_ws_iso, event))
 
         # Accumulate into the target window

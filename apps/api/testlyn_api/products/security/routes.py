@@ -4,10 +4,19 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import select
 
 from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
 from testlyn_api.deps import CurrentUserDep, SessionDep
+from testlyn_api.models.project import Project
+from testlyn_api.models.test import Test
+from testlyn_api.models.test_run import TestRun
+from testlyn_api.products.scan_runs import (
+    create_scan_run,
+    mark_run_launched,
+    public_status,
+)
 from testlyn_api.products.security.runner import SecurityRunner
 from testlyn_api.products.security.schemas import SecurityScanResponse, ZapScanRequest
 
@@ -64,7 +73,16 @@ async def scan(
             detail="target URL is not allowed",
         ) from exc
 
-    scan_id = uuid.uuid4()
+    # Persist a real TestRun BEFORE launch so the engine's
+    # /v1/internal/runs/{id}/complete callback finds a row to transition and
+    # the GET status endpoint below can serve real state.
+    run = await create_scan_run(
+        session,
+        org_id=body.org_id,
+        product="security",
+        triggered_by=current_user.id,
+    )
+    scan_id = run.id
 
     result = await _runner.launch(
         test_run_id=scan_id,
@@ -77,6 +95,8 @@ async def scan(
             "AUTH_RECIPE_ID": str(body.auth_recipe_id) if body.auth_recipe_id else "",
         },
     )
+    mark_run_launched(run, result)
+    await session.commit()
 
     log.info(
         "security.scan.enqueued",
@@ -90,8 +110,43 @@ async def scan(
     is_stub = result.runner_id.startswith("security-stub-")
     return SecurityScanResponse(
         scan_id=scan_id,
-        status="queued",
+        status=public_status(run),
         scan_kind=body.scan_kind,
         findings_count=0,
         message="ZAP not available — canned stub response (0 findings)" if is_stub else None,
+    )
+
+
+@router.get("/scans/{scan_id}", response_model=SecurityScanResponse)
+async def get_scan(
+    scan_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+) -> SecurityScanResponse:
+    """Return the current status of a security scan run."""
+    run = (
+        await session.execute(
+            select(TestRun).where(TestRun.id == scan_id, TestRun.product == "security")
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found")
+
+    test = await session.get(Test, run.test_id)
+    project = await session.get(Project, test.project_id) if test else None
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found")
+    await _enforce_perm(
+        "read",
+        "test_run",
+        user_id=current_user.id,
+        org_id=project.org_id,
+        session=session,
+    )
+
+    return SecurityScanResponse(
+        scan_id=run.id,
+        status=public_status(run),
+        findings_count=0,
+        message=run.error_reason,
     )

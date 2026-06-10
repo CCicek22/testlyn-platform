@@ -14,6 +14,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.0 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml ./
 COPY report_builder ./report_builder
+# Jinja templates live OUTSIDE the package (pdf.py resolves
+# TEMPLATES_DIR = report_builder/../templates → /app/templates). Without this
+# COPY every render raises TemplateNotFound at runtime.
+COPY templates ./templates
 RUN uv venv /opt/venv && \
     VIRTUAL_ENV=/opt/venv uv pip install --no-cache .
 

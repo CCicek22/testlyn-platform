@@ -196,3 +196,22 @@ async def test_post_disables_redirect_following() -> None:
             )
 
     assert captured.get("follow_redirects") is False
+
+
+# ─── assert_safe_url_async: same policy, off-loop DNS ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_assert_safe_url_async_rejects_metadata_ip() -> None:
+    from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url_async
+
+    with pytest.raises(UnsafeURL):
+        await assert_safe_url_async("http://169.254.169.254/computeMetadata/v1/")
+
+
+@pytest.mark.asyncio
+async def test_assert_safe_url_async_allows_public_host() -> None:
+    from testlyn_api.core.url_safety import assert_safe_url_async
+
+    with patch("socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
+        await assert_safe_url_async("https://example.com/hook")  # must not raise

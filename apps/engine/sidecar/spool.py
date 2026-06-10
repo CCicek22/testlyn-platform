@@ -58,8 +58,8 @@ class Spool:
         """Persist a batch to the spool. `poison=True` → write to poison/.
 
         `kind` is a discriminator written into every spool file's header line
-        so `_drain_spool` can route replayed batches to the correct BQ table.
-        Phase 1 only uses "samples_1s"; future phases may add "runs_summary".
+        so `_drain_spool` can route replayed batches to the correct BQ table
+        ("samples_1s" or "runs_summary").
         """
         self._ensure_dirs()
 
@@ -170,9 +170,9 @@ class Spool:
                     first = False
                     if "_kind" in parsed:
                         kind = parsed["_kind"]
-                        assert kind == "samples_1s", (
+                        assert kind in ("samples_1s", "runs_summary"), (
                             f"Unknown spool kind '{kind}' in {path} — "
-                            "only 'samples_1s' is supported in Phase 1"
+                            "only 'samples_1s' and 'runs_summary' are supported"
                         )
                         continue  # header consumed; don't add to rows
                 rows.append(parsed)

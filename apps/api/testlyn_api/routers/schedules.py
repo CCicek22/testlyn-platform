@@ -107,6 +107,12 @@ async def delete_schedule(
 ) -> None:
     handle = _registry.get(schedule_id)
     if handle is None:
+        # The registry is in-process only — empty on other instances and after
+        # a restart/redeploy. Reconstruct the handle statelessly (local store
+        # or the deterministically-named Cloud Scheduler job) so cloud
+        # schedules stay deletable instead of 404ing while the job keeps firing.
+        handle = await svc.get_schedule(schedule_id)
+    if handle is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
 
     import uuid as _uuid

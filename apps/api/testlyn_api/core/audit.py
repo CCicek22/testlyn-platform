@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.core.auth import CurrentUser, get_current_user
 from testlyn_api.core.db import get_session
+from testlyn_api.core.ip_allowlist import _extract_client_ip
 from testlyn_api.models.audit_log import AuditLog
 from testlyn_api.services import audit_siem
 
@@ -130,12 +131,9 @@ class AuditService:
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
+    # The FIRST X-Forwarded-For entry is client-spoofable; reuse the same
+    # rightmost/trusted-depth extraction the IP allowlist middleware uses.
+    return _extract_client_ip(request)
 
 
 async def get_audit_service(

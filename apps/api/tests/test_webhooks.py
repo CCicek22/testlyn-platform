@@ -314,9 +314,12 @@ async def test_dispatcher_fire_creates_delivery(db_session: AsyncSession) -> Non
         "testlyn_api.services.webhooks._deliver_standalone",
         new=AsyncMock(return_value=None),
     ):
-        # Patch create_task so the background coroutine is never scheduled
+        # Patch _spawn_tracked so the background coroutine is never scheduled
         # (avoids "coroutine was never awaited" warning in tests).
-        with patch("asyncio.create_task", new=MagicMock(side_effect=_cancel_coro)):
+        with patch(
+            "testlyn_api.services.webhooks._spawn_tracked",
+            new=MagicMock(side_effect=_cancel_coro),
+        ):
             ids = await dispatcher.fire(org_id, "test.completed", {"run_id": "r1"})
 
     assert len(ids) == 1
@@ -346,9 +349,9 @@ async def test_dispatcher_fire_commits_before_scheduling(
     # The race is purely about ordering: was the producer session committed at
     # the moment the background task is scheduled? A standalone session (as used
     # by _deliver_standalone) can only see the row if commit already happened.
-    # We capture, at create_task() time, whether the producer session still has
-    # an open (uncommitted) transaction — pre-fix it does (commit comes after),
-    # post-fix it does not.
+    # We capture, at _spawn_tracked() time, whether the producer session still
+    # has an open (uncommitted) transaction — pre-fix it does (commit comes
+    # after), post-fix it does not.
     open_txn_at_schedule: list[bool] = []
 
     def _capture(coro: object) -> None:
@@ -359,7 +362,10 @@ async def test_dispatcher_fire_commits_before_scheduling(
     dispatcher = WebhookDispatcher(db_session)
     with patch(
         "testlyn_api.services.webhooks._deliver_standalone", new=AsyncMock()
-    ), patch("asyncio.create_task", new=MagicMock(side_effect=_capture)):
+    ), patch(
+        "testlyn_api.services.webhooks._spawn_tracked",
+        new=MagicMock(side_effect=_capture),
+    ):
         ids = await dispatcher.fire(org_id, "test.completed", {"run_id": "r1"})
 
     assert len(ids) == 1
@@ -368,6 +374,103 @@ async def test_dispatcher_fire_commits_before_scheduling(
         "producer session still in an uncommitted transaction when the "
         "background delivery was scheduled → standalone session would see None"
     )
+
+
+# ─── Retry scheduling: failed deliveries are actually re-delivered ────────────
+
+
+async def _seed_endpoint_and_delivery(
+    db_session: AsyncSession,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    org_id = await _seed_org(db_session)
+    ep = WebhookEndpoint(
+        org_id=org_id,
+        url="https://example.com/hook",
+        secret="s",
+        events=["test.completed"],
+        active=True,
+    )
+    db_session.add(ep)
+    await db_session.flush()
+    delivery = WebhookDelivery(
+        endpoint_id=ep.id,
+        event_type="test.completed",
+        payload={"run_id": "retry"},
+        status="pending",
+    )
+    db_session.add(delivery)
+    await db_session.commit()
+    return ep.id, delivery.id
+
+
+async def _wait_for_status(delivery_id: uuid.UUID, wanted: set[str], timeout: float = 2.0) -> str:
+    """Poll the delivery row from a fresh session until it reaches a wanted status."""
+    import asyncio
+
+    from testlyn_api.core.db import _session_factory
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    status_now = ""
+    while asyncio.get_event_loop().time() < deadline:
+        async with _session_factory() as session:
+            row = await session.get(WebhookDelivery, delivery_id)
+            status_now = row.status if row else ""
+        if status_now in wanted:
+            return status_now
+        await asyncio.sleep(0.02)
+    return status_now
+
+
+@pytest.mark.asyncio
+async def test_failed_delivery_is_retried_until_success(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed deliver() schedules an in-process retry that re-delivers."""
+    import testlyn_api.services.webhooks as webhooks
+
+    _, delivery_id = await _seed_endpoint_and_delivery(db_session)
+
+    calls = {"n": 0}
+
+    async def _fake_post(**kwargs) -> bool:
+        calls["n"] += 1
+        return calls["n"] >= 2  # fail first attempt, succeed on the retry
+
+    monkeypatch.setattr(webhooks, "_post", _fake_post)
+    monkeypatch.setattr(webhooks, "_RETRY_DELAYS", [0, 0])
+
+    ok = await webhooks.WebhookDispatcher(db_session).deliver(delivery_id)
+    assert ok is False  # first attempt failed
+
+    final = await _wait_for_status(delivery_id, {"completed"})
+    assert final == "completed"
+    assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_delivery_abandoned_after_max_attempts(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retries stop (abandoned) once attempts exceed the retry schedule."""
+    import testlyn_api.services.webhooks as webhooks
+
+    _, delivery_id = await _seed_endpoint_and_delivery(db_session)
+
+    calls = {"n": 0}
+
+    async def _always_fail(**kwargs) -> bool:
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(webhooks, "_post", _always_fail)
+    monkeypatch.setattr(webhooks, "_RETRY_DELAYS", [0])  # 1 retry max
+
+    ok = await webhooks.WebhookDispatcher(db_session).deliver(delivery_id)
+    assert ok is False
+
+    final = await _wait_for_status(delivery_id, {"abandoned"})
+    assert final == "abandoned"
+    assert calls["n"] == 2  # initial attempt + exactly one retry
 
 
 # ─── RBAC: webhook admin requires admin for mutations (finding #5) ────────────

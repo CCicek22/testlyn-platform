@@ -6,7 +6,7 @@ import { api } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProduct } from "@/lib/products";
-import type { TestRun, RunState, FunctionalRunSummary } from "@testlyn/shared";
+import type { TestRun, RunState } from "@testlyn/shared";
 
 const PRODUCT = "functional";
 const ACCENT = getProduct(PRODUCT).accent; // #7CFFE1
@@ -14,8 +14,8 @@ const ACCENT = getProduct(PRODUCT).accent; // #7CFFE1
 const STATE_STYLES: Record<RunState, string> = {
   queued:    "border-zinc-700 bg-zinc-800 text-zinc-400",
   running:   "border-violet-500/30 bg-violet-500/10 text-violet-400",
-  done:      "border-success/30 bg-success/10 text-success",
-  error:     "border-alert/30 bg-alert/10 text-alert",
+  completed: "border-success/30 bg-success/10 text-success",
+  failed:    "border-alert/30 bg-alert/10 text-alert",
   cancelled: "border-zinc-700 bg-zinc-800 text-zinc-400",
 };
 
@@ -43,12 +43,10 @@ export default function FunctionalRunPage() {
     },
   });
 
-  // Summary data — will be populated by W2B backend stream
-  const { data: summary } = useQuery<FunctionalRunSummary>({
-    queryKey: ["run-summary", runId, PRODUCT],
-    queryFn: () => api.runs.summary(runId, PRODUCT) as Promise<FunctionalRunSummary>,
-    enabled: !!run && (run.state === "done" || run.state === "error"),
-  });
+  // NOTE: api.runs.summary() only returns {run_id, summary_uri, state,
+  // error_reason} — per-test counts (passed/failed/healed) are not exposed by
+  // the backend yet, so the stat cards below render explicit placeholders
+  // until the Functional runner (W2B) ships result streaming.
 
   if (error) {
     return (
@@ -93,17 +91,17 @@ export default function FunctionalRunPage() {
             <Badge className="border-zinc-700 bg-zinc-800 font-mono text-xs text-zinc-400">{runId}</Badge>
           )}
           {!isLoading && (
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATE_STYLES[state]}`}>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATE_STYLES[state] ?? STATE_STYLES.queued}`}>
               {state.charAt(0).toUpperCase() + state.slice(1)}
             </span>
           )}
         </div>
 
-        {/* Result summary */}
+        {/* Result summary — counts not yet available from the backend */}
         <div className="grid grid-cols-3 gap-3 mb-6">
-          <StatCard label="Passed"  value={summary?.tests_passed  ?? "—"} colorClass="text-success" />
-          <StatCard label="Failed"  value={summary?.tests_failed  ?? "—"} colorClass="text-alert" />
-          <StatCard label="Healed"  value={summary?.tests_healed  ?? "—"} colorClass="text-warn" />
+          <StatCard label="Passed"  value="—" colorClass="text-success" />
+          <StatCard label="Failed"  value="—" colorClass="text-alert" />
+          <StatCard label="Healed"  value="—" colorClass="text-warn" />
         </div>
 
         {state === "running" || state === "queued" ? (

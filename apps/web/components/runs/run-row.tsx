@@ -10,13 +10,14 @@ import type { RunState, TestRun } from "@testlyn/shared";
 const STATE_STYLES: Record<RunState, { dot: string; text: string; bg: string }> = {
   queued:    { dot: "bg-zinc-500",                text: "text-zinc-400",   bg: "bg-zinc-800/60" },
   running:   { dot: "bg-primary animate-pulse",   text: "text-primary",    bg: "bg-primary/10" },
-  done:      { dot: "bg-success",                 text: "text-success",    bg: "bg-success/10" },
-  error:     { dot: "bg-alert",                   text: "text-alert",      bg: "bg-alert/10" },
+  completed: { dot: "bg-success",                 text: "text-success",    bg: "bg-success/10" },
+  failed:    { dot: "bg-alert",                   text: "text-alert",      bg: "bg-alert/10" },
   cancelled: { dot: "bg-zinc-500",                text: "text-zinc-400",   bg: "bg-zinc-800/60" },
 };
 
 function StateBadge({ state }: { state: RunState }) {
-  const s = STATE_STYLES[state];
+  // Fallback guards against unknown wire values crashing the run list.
+  const s = STATE_STYLES[state] ?? STATE_STYLES.queued;
   return (
     <span
       className={cn(

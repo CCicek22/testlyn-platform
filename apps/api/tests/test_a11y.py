@@ -291,6 +291,71 @@ async def test_one_shot_audit_enqueued(
 
 
 @pytest.mark.asyncio
+async def test_one_shot_audit_passes_org_id_and_transitions_state(
+    client: AsyncClient,
+    db_session,
+    dev_org_id: uuid.UUID,
+) -> None:
+    """Review finding: launch env lacked ORG_ID (sidecar SidecarConfig
+    hard-requires it) and the run was never moved out of 'queued', so the
+    /complete callback 409'd."""
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock, patch
+
+    from testlyn_api.core.runner import RunnerLaunchResult
+    from testlyn_api.models.project import Project
+    from testlyn_api.models.test import Test as TestModel
+    from testlyn_api.models.test_run import TestRun as TestRunModel
+    from testlyn_api.products.a11y import routes as a11y_routes
+
+    project = Project(org_id=dev_org_id, name="P", slug="p-a11y-env")
+    db_session.add(project)
+    await db_session.flush()
+    test = TestModel(project_id=project.id, name="T", script_inline="x", product="a11y")
+    db_session.add(test)
+    await db_session.flush()
+    run = TestRunModel(test_id=test.id, product="a11y")
+    db_session.add(run)
+    await db_session.flush()
+    run_id = run.id
+    await db_session.commit()
+
+    launch_mock = AsyncMock(
+        return_value=RunnerLaunchResult(
+            runner_id="exec-1", started_at=datetime.now(tz=UTC), region="us-central1"
+        )
+    )
+    with patch.object(a11y_routes._runner, "launch", launch_mock):
+        response = await client.post(
+            "/v1/products/a11y/audit",
+            json={
+                "test_run_id": str(run_id),
+                "config": {"urls": ["https://example.com"], "max_depth": 1},
+            },
+        )
+    assert response.status_code == 202
+
+    env = launch_mock.call_args.kwargs["env"]
+    assert env["ORG_ID"] == str(dev_org_id)
+    assert env["RUN_ID"] == str(run_id)
+
+    await db_session.refresh(run)
+    assert run.state == "running"
+    assert run.runner_id == "exec-1"
+
+    # Second launch against the same (now running) run → 409, no double-launch.
+    with patch.object(a11y_routes._runner, "launch", launch_mock):
+        second = await client.post(
+            "/v1/products/a11y/audit",
+            json={
+                "test_run_id": str(run_id),
+                "config": {"urls": ["https://example.com"], "max_depth": 1},
+            },
+        )
+    assert second.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_get_violations_stub(client: AsyncClient) -> None:
     """GET /v1/runs/:id/violations returns 200 with empty stub report."""
     run_id = str(uuid.uuid4())

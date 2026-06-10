@@ -400,3 +400,37 @@ async def test_quota_exceeded_blocks_run(
     detail = body["detail"]
     assert detail["code"] == "QUOTA_EXCEEDED"
     assert detail["limits"]["tests_per_month"] == 5
+
+
+# ---------------------------------------------------------------------------
+# _client_ip: spoof-resistant X-Forwarded-For extraction
+# ---------------------------------------------------------------------------
+
+
+def _fake_request(xff: str | None, client_host: str = "10.0.0.1"):
+    from unittest.mock import MagicMock
+
+    req = MagicMock()
+    headers = {}
+    if xff:
+        headers["X-Forwarded-For"] = xff
+    req.headers.get = lambda key, default="": headers.get(key, default)
+    req.client.host = client_host
+    return req
+
+
+def test_client_ip_uses_rightmost_xff_entry() -> None:
+    """The FIRST XFF entry is client-spoofable; audit must record the entry
+    appended by the trusted proxy (rightmost, depth 1) — same policy as the IP
+    allowlist middleware."""
+    from testlyn_api.core.audit import _client_ip
+
+    req = _fake_request("6.6.6.6, 203.0.113.5")  # 6.6.6.6 = attacker-supplied
+    assert _client_ip(req) == "203.0.113.5"
+
+
+def test_client_ip_falls_back_to_socket_peer() -> None:
+    from testlyn_api.core.audit import _client_ip
+
+    req = _fake_request(None, client_host="198.51.100.7")
+    assert _client_ip(req) == "198.51.100.7"

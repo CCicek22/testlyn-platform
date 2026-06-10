@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import HTTPException, status
-from sqlalchemy import select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.models.usage import UsageRecord
@@ -50,15 +50,11 @@ class QuotaService:
         # not serialize across Cloud Run instances. Use Postgres-native
         # hashtextextended() (deterministic) computed inside the DB; the org_id
         # is passed as a bind parameter, never interpolated into SQL.
-        # Raw SQL here is an explicit exception to §6 (no raw SQL in app code);
-        # pg_advisory_xact_lock has no SQLAlchemy ORM equivalent.
         # Skipped on non-Postgres backends (e.g. SQLite in tests).
         dialect = self._session.bind.dialect.name if self._session.bind else ""  # type: ignore[union-attr]
         if dialect == "postgresql":
             await self._session.execute(
-                text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))").bindparams(
-                    k=str(org_id)
-                )
+                select(func.pg_advisory_xact_lock(func.hashtextextended(str(org_id), 0)))
             )
 
         result = await self._session.execute(

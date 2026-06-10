@@ -48,24 +48,10 @@ WORK_DIR="${WORK_DIR:-/tmp/work}"
 mkdir -p "${WORK_DIR}"
 
 # ---------------------------------------------------------------------------
-# Clamp VUS to MAX_VUS (fix #13 of audit).
-# VUS arrives from the API as untrusted input; an unbounded value would let a
-# customer schedule a run that DoSes the worker (memory + file-descriptor
-# blow-up well before k6 itself errors).  MAX_VUS is operator-tunable.
-# ---------------------------------------------------------------------------
-if ! [[ "${VUS}" =~ ^[0-9]+$ ]]; then
-    echo "[entrypoint] VUS is not a non-negative integer: '${VUS}'" >&2
-    exit 2
-fi
-if [ "${VUS}" -gt "${MAX_VUS}" ]; then
-    echo "[entrypoint] requested VUS=${VUS} exceeds MAX_VUS=${MAX_VUS}" >&2
-    exit 2
-fi
-
-# ---------------------------------------------------------------------------
-# Track sidecar PID and k6 exit code for cleanup
+# Track sidecar + k6 PIDs and k6 exit code for cleanup
 # ---------------------------------------------------------------------------
 SIDECAR_PID=""
+K6_PID=""
 K6_EXIT=1  # pessimistic default; overwritten after k6 actually runs
 
 # ---------------------------------------------------------------------------
@@ -122,6 +108,24 @@ cleanup() {
     exit "${K6_EXIT}"
 }
 trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# SIGTERM handling (spec §8 drain contract).
+# tini (not -g) forwards SIGTERM to this bash process ONLY — children do not
+# get it. Without forwarding, k6 + sidecar never see the signal: no 30s drain,
+# spool lost, run stuck 'running'. Forward TERM to both; the interrupted
+# `wait` below resumes, and the EXIT trap then runs the normal drain/callback.
+# ---------------------------------------------------------------------------
+_on_term() {
+    echo "[entrypoint] SIGTERM received — forwarding to k6 + sidecar for graceful drain" >&2
+    if [ -n "${K6_PID}" ] && kill -0 "${K6_PID}" 2>/dev/null; then
+        kill -TERM "${K6_PID}" 2>/dev/null || true
+    fi
+    if [ -n "${SIDECAR_PID}" ] && kill -0 "${SIDECAR_PID}" 2>/dev/null; then
+        kill -TERM "${SIDECAR_PID}" 2>/dev/null || true
+    fi
+}
+trap _on_term TERM
 
 # ---------------------------------------------------------------------------
 # GCS helpers (curl + OIDC — no gcloud SDK required in the image)
@@ -185,6 +189,26 @@ _post_callback() {
 }
 
 # ---------------------------------------------------------------------------
+# Clamp VUS to MAX_VUS (fix #13 of audit).
+# VUS arrives from the API as untrusted input; an unbounded value would let a
+# customer schedule a run that DoSes the worker (memory + file-descriptor
+# blow-up well before k6 itself errors).  MAX_VUS is operator-tunable.
+# NOTE: this block MUST run after the EXIT trap + helper definitions above so
+# a validation failure still fires the cleanup callback (otherwise the run is
+# stuck in 'running' forever).
+# ---------------------------------------------------------------------------
+if ! [[ "${VUS}" =~ ^[0-9]+$ ]]; then
+    echo "[entrypoint] VUS is not a non-negative integer: '${VUS}'" >&2
+    K6_EXIT=2
+    exit 2
+fi
+if [ "${VUS}" -gt "${MAX_VUS}" ]; then
+    echo "[entrypoint] requested VUS=${VUS} exceeds MAX_VUS=${MAX_VUS}" >&2
+    K6_EXIT=2
+    exit 2
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Fetch k6 script from GCS
 # ---------------------------------------------------------------------------
 echo "[entrypoint] fetching script from ${SCRIPT_GCS_URI}"
@@ -216,6 +240,9 @@ fi
 # ---------------------------------------------------------------------------
 echo "[entrypoint] starting k6 (vus=${VUS}, duration=${DURATION})"
 set +e  # allow k6 to exit non-zero without killing the script
+# k6 runs in the background so the TERM trap can fire while we `wait`:
+# bash only delivers trapped signals between foreground commands, so a
+# foreground k6 would block the trap until k6 exited on its own.
 k6 run \
     --out "json=${K6_OUTPUT_PATH}" \
     --summary-export "${WORK_DIR}/summary.json" \
@@ -223,8 +250,19 @@ k6 run \
     --tag "org_id=${ORG_ID}" \
     --vus "${VUS}" \
     --duration "${DURATION}" \
-    "${WORK_DIR}/script.js"
-K6_EXIT=$?
+    "${WORK_DIR}/script.js" &
+K6_PID=$!
+# `wait` returns 128+signum when interrupted by a trapped signal BEFORE the
+# child actually exits — re-wait until k6 is really gone so K6_EXIT is k6's
+# true exit code (k6 exits gracefully after the forwarded SIGTERM).
+while :; do
+    wait "${K6_PID}"
+    K6_EXIT=$?
+    if kill -0 "${K6_PID}" 2>/dev/null; then
+        continue  # wait was interrupted by the TERM trap; k6 still running
+    fi
+    break
+done
 set -e
 echo "[entrypoint] k6 exited with code ${K6_EXIT}"
 

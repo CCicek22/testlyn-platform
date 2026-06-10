@@ -7,7 +7,6 @@ Auth:   CurrentUserDep (dev-bypass in tests). Uses W3A requires() if available;
 
 from __future__ import annotations
 
-import asyncio
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -19,11 +18,11 @@ from pydantic import BaseModel, HttpUrl
 from sqlalchemy import select
 
 from testlyn_api.core.permissions import _enforce_perm
-from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url_async
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.org import OrgMember
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
-from testlyn_api.services.webhooks import EVENTS, _deliver_standalone
+from testlyn_api.services.webhooks import EVENTS, _deliver_standalone, _spawn_tracked
 
 log = structlog.get_logger(__name__)
 
@@ -103,7 +102,7 @@ async def create_endpoint(
     await _enforce_perm(
         "write", "webhook", user_id=current_user.id, org_id=org_id, session=session
     )
-    _validate_url(str(body.url))
+    await _validate_url(str(body.url))
     _validate_events(body.events)
 
     ep = WebhookEndpoint(
@@ -159,7 +158,7 @@ async def patch_endpoint(
     )
 
     if body.url is not None:
-        _validate_url(str(body.url))
+        await _validate_url(str(body.url))
         ep.url = str(body.url)
     if body.events is not None:
         _validate_events(body.events)
@@ -257,8 +256,9 @@ async def replay_delivery(
     await session.commit()
     await session.refresh(delivery)
 
-    # Kick off delivery attempt via dispatcher
-    asyncio.create_task(  # noqa: RUF006
+    # Kick off delivery attempt via dispatcher. Strong-ref tracked — a bare
+    # create_task can be GC'd mid-flight, silently dropping the replay.
+    _spawn_tracked(
         _deliver_standalone(
             delivery.id,
             ep.url,
@@ -290,15 +290,16 @@ def _validate_events(events: list[str]) -> None:
         )
 
 
-def _validate_url(url: str) -> None:
+async def _validate_url(url: str) -> None:
     """Reject SSRF-unsafe destination URLs at create/update time.
 
-    Reuses the centralized SSRF guard (core.url_safety.assert_safe_url, the same
-    one webhook delivery uses) so invalid/internal endpoints are rejected early
-    rather than silently failing on first delivery.
+    Reuses the centralized SSRF guard (core.url_safety, the same policy webhook
+    delivery uses) so invalid/internal endpoints are rejected early rather than
+    silently failing on first delivery. Async-safe: DNS resolution runs off the
+    event loop.
     """
     try:
-        assert_safe_url(url)
+        await assert_safe_url_async(url)
     except UnsafeURL as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

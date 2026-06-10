@@ -12,8 +12,8 @@ export type OrgMemberRole = "owner" | "admin" | "member";
 export type RunState =
   | "queued"
   | "running"
-  | "done"
-  | "error"
+  | "completed"
+  | "failed"
   | "cancelled";
 
 export type TestProduct = "load" | "functional" | "a11y"; // Phase 1: load. Phase 2+: functional, a11y
@@ -136,8 +136,10 @@ export interface PaginatedResponse<T> {
 // ─── SSE event payloads ───────────────────────────────────────────────────────
 
 /**
- * One 1-second aggregated sample emitted by /v1/runs/:id/stream.
- * Mirrors the BigQuery `samples_1s` row for metric_name='http_req_duration'.
+ * One 1-second aggregated sample as consumed by the web charts / stat cards.
+ * NOT the SSE wire shape (that is `RunStreamFrame` below) — frames are mapped
+ * into this shape client-side. Mirrors the BigQuery `samples_1s` row for
+ * metric_name='http_req_duration'.
  */
 export interface LiveSample {
   /** ISO-8601 timestamp of the 1s window start */
@@ -153,16 +155,30 @@ export interface LiveSample {
   vu_count: number;
 }
 
-export interface RunStateEvent {
-  run_id: string;
-  state: RunState;
-  timestamp: string;
+/**
+ * One metric element inside a stream frame. Mirrors the dict built by
+ * `bq_queries.stream_run_metrics` in the API (`ts`, `p95_duration_ms`,
+ * `error_rate`, `vus`).
+ */
+export interface RunStreamMetric {
+  /** ISO-8601 timestamp of the 1s window, or null if BQ row had none */
+  ts: string | null;
+  p95_duration_ms: number | null;
+  /** Error rate 0–1 */
+  error_rate: number;
+  vus: number;
 }
 
-export type SSEEventPayload =
-  | { type: "sample"; data: LiveSample }
-  | { type: "state"; data: RunStateEvent }
-  | { type: "done" };
+/**
+ * Wire shape of each SSE `data:` frame from GET /v1/runs/:id/stream
+ * (see apps/api/testlyn_api/routers/stream.py — there is no `type` field;
+ * stream termination is signalled separately via `event: done`).
+ */
+export interface RunStreamFrame {
+  run_id: string;
+  state: RunState;
+  metrics: RunStreamMetric[];
+}
 
 // ─── Phase 2: Target entity ───────────────────────────────────────────────────
 
