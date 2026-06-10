@@ -19,6 +19,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from testlyn_api.core.url_safety import assert_safe_url_async
 from testlyn_api.models.audit_log import AuditLog
 from testlyn_api.models.audit_siem_sink import AuditSiemSink
 
@@ -85,7 +86,18 @@ async def _post_with_retry(
     headers: dict[str, str],
     payload: dict[str, Any],
 ) -> None:
-    """POST payload to url, retrying up to _MAX_RETRIES times."""
+    """POST payload to url, retrying up to _MAX_RETRIES times.
+
+    Raises ``UnsafeURL`` (no retries) if the destination fails the SSRF guard.
+    """
+    # SSRF guard, mirroring the webhook path: the sink URL is org-supplied
+    # config and this POST runs server-side. Re-validated at send time (not
+    # just create time) so sinks whose DNS later flips to an internal IP, or
+    # rows created before validation existed, never reach internal targets.
+    # Checked BEFORE the retry loop — an unsafe URL must not be retried.
+    # Async-safe: DNS resolution runs in a worker thread.
+    await assert_safe_url_async(url)
+
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:

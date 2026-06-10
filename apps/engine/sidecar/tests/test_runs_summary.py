@@ -73,7 +73,7 @@ class TestWriteRunsSummary:
 
         captured: list[list[dict[str, Any]]] = []
 
-        async def fake_insert(rows: list[dict[str, Any]], *, table_id: str) -> None:
+        async def fake_insert(rows: list[dict[str, Any]], *, table_id: str, kind: str = "samples_1s") -> None:
             captured.append(rows)
 
         with patch.object(writer, "_insert_with_retry", side_effect=fake_insert):
@@ -102,7 +102,7 @@ class TestWriteRunsSummary:
 
         captured: list[list[dict[str, Any]]] = []
 
-        async def fake_insert(rows: list[dict[str, Any]], *, table_id: str) -> None:
+        async def fake_insert(rows: list[dict[str, Any]], *, table_id: str, kind: str = "samples_1s") -> None:
             captured.append(rows)
 
         with patch.object(writer, "_insert_with_retry", side_effect=fake_insert):

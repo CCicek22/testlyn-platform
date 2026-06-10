@@ -31,6 +31,26 @@ def _job_name(test_id: str, handle_id: str) -> str:
     return f"projects/{project}/locations/{location}/jobs/testlyn-sched-{handle_id}"
 
 
+def _job_description(org_id: str, test_id: str) -> str:
+    """Tenancy marker stored on the Cloud Scheduler job.
+
+    Cloud Scheduler jobs don't support labels, so org/test ownership is encoded
+    in the description. ``list_schedules``/``get_schedule`` parse it back — a
+    job without this marker is never attributed to any org.
+    """
+    return f"testlyn org_id={org_id} test_id={test_id}"
+
+
+def _parse_job_metadata(description: str) -> dict[str, str]:
+    """Parse ``org_id=...``/``test_id=...`` tokens from a job description."""
+    meta: dict[str, str] = {}
+    for token in (description or "").split():
+        key, sep, value = token.partition("=")
+        if sep and key in ("org_id", "test_id") and value:
+            meta[key] = value
+    return meta
+
+
 async def _try_cloud_scheduler() -> Any | None:
     """Return a Cloud Scheduler client or None if creds unavailable."""
     try:
@@ -84,6 +104,7 @@ async def create_schedule(test_id: str, cron: str, tz: str, *, org_id: str) -> S
     target_url = f"{settings.api_base_url}/v1/internal/tests/{test_id}/runs"
     job = scheduler_v1.Job(
         name=job_name,
+        description=_job_description(org_id, test_id),
         schedule=cron,
         time_zone=tz,
         http_target=scheduler_v1.HttpTarget(
@@ -154,12 +175,16 @@ async def list_schedules(org_id: str) -> list[ScheduleHandle]:
         if "testlyn-sched-" not in job.name:
             continue
         handle_id = job.name.split("testlyn-sched-")[-1]
-        # We don't have org_id stored in Cloud Scheduler — skip org filter in cloud mode
-        # (a proper impl would store org_id in job description or labels)
+        # Tenant isolation: only return jobs whose description marker matches
+        # the requesting org. Jobs without a marker (pre-marker legacy) are
+        # skipped — never stamp the requesting org's id onto a foreign job.
+        meta = _parse_job_metadata(job.description)
+        if meta.get("org_id") != org_id:
+            continue
         handles.append(
             ScheduleHandle(
                 id=handle_id,
-                test_id="",
+                test_id=meta.get("test_id", ""),
                 org_id=org_id,
                 cron=job.schedule,
                 timezone=job.time_zone,
@@ -167,3 +192,43 @@ async def list_schedules(org_id: str) -> list[ScheduleHandle]:
             )
         )
     return handles
+
+
+async def get_schedule(handle_id: str) -> ScheduleHandle | None:
+    """Resolve a handle by id — local store first, then Cloud Scheduler.
+
+    Cloud job names are deterministic (``testlyn-sched-<handle_id>``), so a
+    handle can be reconstructed on any instance / after a restart without the
+    in-process registry — this is what keeps cloud schedules deletable.
+    Returns ``None`` if the job doesn't exist or carries no org marker (a
+    handle without an org can't be authorized).
+    """
+    local = _local_store.get(handle_id)
+    if local is not None:
+        return local
+
+    client = await _try_cloud_scheduler()
+    if client is None:
+        return None
+
+    from google.cloud import scheduler_v1
+
+    job_name = _job_name("", handle_id)
+    try:
+        job = await client.get_job(request=scheduler_v1.GetJobRequest(name=job_name))
+    except Exception:
+        log.info("scheduler.get_not_found", handle_id=handle_id)
+        return None
+
+    meta = _parse_job_metadata(job.description)
+    org_id = meta.get("org_id")
+    if not org_id:
+        return None
+    return ScheduleHandle(
+        id=handle_id,
+        test_id=meta.get("test_id", ""),
+        org_id=org_id,
+        cron=job.schedule,
+        timezone=job.time_zone,
+        local=False,
+    )

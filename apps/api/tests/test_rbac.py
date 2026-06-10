@@ -9,7 +9,9 @@ Covers:
 
 from __future__ import annotations
 
+import socket
 import uuid
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -17,6 +19,19 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.models.org import OrgMember
 from testlyn_api.models.project_role_override import ProjectRoleOverride
+
+# Sink URLs are now SSRF-validated (DNS resolved) at create time — resolve
+# every hostname to a public IP so tests pass offline in CI.
+_PUBLIC_ADDRINFO = [
+    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+]
+
+
+@pytest.fixture(autouse=True)
+def _mock_public_dns():
+    with patch("socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO):
+        yield
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

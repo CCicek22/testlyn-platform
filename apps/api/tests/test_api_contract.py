@@ -131,7 +131,8 @@ async def test_scan_returns_202(client: AsyncClient, dev_org_id: uuid.UUID) -> N
     assert response.status_code == 202
     data = response.json()
     assert data["product"] == "api_contract"
-    assert data["status"] == "queued"
+    # A real TestRun row is created and transitioned on launch now.
+    assert data["status"] == "running"
     assert data["drift_count"] == 0
     assert "scan_id" in data
     # stub mode includes message
@@ -157,4 +158,58 @@ async def test_scan_custom_hypothesis(client: AsyncClient, dev_org_id: uuid.UUID
             },
         )
     assert response.status_code == 202
-    assert response.json()["status"] == "queued"
+    assert response.json()["status"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# Cloud launch env (review finding: INTERNAL_TOKEN was missing → callbacks 403)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_launch_cloud_env_includes_internal_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from google.cloud import run_v2
+
+    from testlyn_api.products.api_contract import runner as runner_mod
+
+    class _FakeOp:
+        metadata = SimpleNamespace(name="projects/p/locations/r/jobs/j/executions/e")
+
+    captured: dict = {}
+
+    class _FakeJobs:
+        def __init__(self, *a, **k):  # noqa: ANN002, ANN003
+            pass
+
+        async def run_job(self, request=None, **_k):  # noqa: ANN001, ANN003
+            captured["request"] = request
+            return _FakeOp()
+
+    monkeypatch.setattr(
+        runner_mod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            run_mode="cloud",
+            gcp_project_id="test-project",
+            gcp_region="us-central1",
+            api_base_url="http://testserver",
+            internal_token="secret-tok",
+        ),
+    )
+    monkeypatch.setattr(run_v2, "JobsAsyncClient", _FakeJobs)
+
+    from testlyn_api.products.api_contract.runner import ApiContractRunner
+
+    await ApiContractRunner()._launch_cloud(
+        test_run_id=uuid.uuid4(),
+        env={"TARGET_URL": "https://example.com"},
+    )
+
+    co = captured["request"].overrides.container_overrides[0]
+    env = {e.name: e.value for e in co.env}
+    assert env["INTERNAL_TOKEN"] == "secret-tok"
+    assert "CALLBACK_URL" in env

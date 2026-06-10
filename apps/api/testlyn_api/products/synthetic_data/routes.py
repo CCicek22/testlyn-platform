@@ -4,10 +4,19 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import select
 
 from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
+from testlyn_api.models.project import Project
+from testlyn_api.models.test import Test
+from testlyn_api.models.test_run import TestRun
+from testlyn_api.products.scan_runs import (
+    create_scan_run,
+    mark_run_launched,
+    public_status,
+)
 from testlyn_api.products.synthetic_data.runner import SyntheticDataRunner
 from testlyn_api.products.synthetic_data.schemas import GenerateRequest, GenerateResponse
 
@@ -48,7 +57,16 @@ async def generate(
         session=session,
     )
 
-    job_id = uuid.uuid4()
+    # Persist a real TestRun BEFORE launch so the engine's
+    # /v1/internal/runs/{id}/complete callback finds a row to transition and
+    # the GET status endpoint below can serve real state.
+    run = await create_scan_run(
+        session,
+        org_id=body.org_id,
+        product="synthetic_data",
+        triggered_by=current_user.id,
+    )
+    job_id = run.id
 
     result = await _runner.launch(
         test_run_id=job_id,
@@ -63,6 +81,9 @@ async def generate(
             "GDPR_MASKING_RULES": _json_env(body.gdpr_masking_rules),
         },
     )
+
+    mark_run_launched(run, result)
+    await session.commit()
 
     log.info(
         "synthetic_data.generate.enqueued",
@@ -79,8 +100,44 @@ async def generate(
 
     return GenerateResponse(
         job_id=job_id,
-        status="queued",
+        status=public_status(run),
         dump_gcs_uri=dump_uri,
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=GenerateResponse)
+async def get_job(
+    job_id: uuid.UUID,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+) -> GenerateResponse:
+    """Return the current status of a synthetic-data generation job."""
+    run = (
+        await session.execute(
+            select(TestRun).where(
+                TestRun.id == job_id, TestRun.product == "synthetic_data"
+            )
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    test = await session.get(Test, run.test_id)
+    project = await session.get(Project, test.project_id) if test else None
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    await _enforce_perm(
+        "read",
+        "test_run",
+        user_id=current_user.id,
+        org_id=project.org_id,
+        session=session,
+    )
+
+    return GenerateResponse(
+        job_id=run.id,
+        status=public_status(run),
+        message=run.error_reason,
     )
 
 

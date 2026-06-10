@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 
@@ -90,7 +91,9 @@ async def get_current_user(
     try:
         import firebase_admin.auth as fb_auth
 
-        decoded = fb_auth.verify_id_token(token)
+        # verify_id_token does blocking network I/O (JWKS fetch) — run it in a
+        # worker thread so the event loop is never stalled.
+        decoded = await asyncio.to_thread(fb_auth.verify_id_token, token)
         return CurrentUser(
             id=uuid.uuid5(uuid.NAMESPACE_URL, decoded["uid"]),
             email=decoded.get("email", ""),

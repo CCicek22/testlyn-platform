@@ -167,3 +167,62 @@ async def test_launch_cloud_raises_when_no_script_at_all(
             duration_seconds=1,
             env={"ORG_ID": "org-123"},
         )
+
+
+@pytest.mark.asyncio
+async def test_launch_cloud_strips_script_inline_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SCRIPT_INLINE must NOT travel in the Cloud Run Job env overrides: the
+    engine never reads it and a large script fails the launch with
+    InvalidArgument (env value size limits)."""
+    from google.cloud import storage
+
+    monkeypatch.setattr(k6_runner, "get_settings", _fake_settings)
+    monkeypatch.setattr(run_v2, "JobsAsyncClient", _FakeJobsAsyncClient)
+    _FakeStorageClient.uploaded = {}
+    monkeypatch.setattr(storage, "Client", _FakeStorageClient)
+
+    inline = "export default function () {}"
+    caller_env = {"ORG_ID": "org-123", "SCRIPT_INLINE": inline}
+
+    await k6_runner.K6Runner()._launch_cloud(
+        test_run_id=uuid.uuid4(),
+        script_uri="",
+        vus=1,
+        duration_seconds=1,
+        env=caller_env,
+    )
+
+    oenv = _override_env(_FakeJobsAsyncClient.last_request)
+    assert "SCRIPT_INLINE" not in oenv
+    # Caller's dict is not mutated (we pop from a copy).
+    assert caller_env["SCRIPT_INLINE"] == inline
+
+    # Also stripped when a script_uri is already present.
+    await k6_runner.K6Runner()._launch_cloud(
+        test_run_id=uuid.uuid4(),
+        script_uri="gs://bucket/script.js",
+        vus=1,
+        duration_seconds=1,
+        env={"ORG_ID": "org-123", "SCRIPT_INLINE": inline},
+    )
+    assert "SCRIPT_INLINE" not in _override_env(_FakeJobsAsyncClient.last_request)
+
+
+@pytest.mark.asyncio
+async def test_launch_cloud_rejects_oversize_inline_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(k6_runner, "get_settings", _fake_settings)
+    monkeypatch.setattr(run_v2, "JobsAsyncClient", _FakeJobsAsyncClient)
+
+    too_big = "x" * (k6_runner._MAX_SCRIPT_BYTES + 1)
+    with pytest.raises(ValueError, match="exceeds"):
+        await k6_runner.K6Runner()._launch_cloud(
+            test_run_id=uuid.uuid4(),
+            script_uri="",
+            vus=1,
+            duration_seconds=1,
+            env={"ORG_ID": "org-123", "SCRIPT_INLINE": too_big},
+        )

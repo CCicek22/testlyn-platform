@@ -9,6 +9,7 @@ SSRF policy.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from typing import Final
@@ -82,3 +83,13 @@ def assert_safe_url(url: str) -> None:
             or ip.is_unspecified
         ):
             raise UnsafeURL(f"resolved to disallowed ip: {ip_str}")
+
+
+async def assert_safe_url_async(url: str) -> None:
+    """Async-safe variant of :func:`assert_safe_url`.
+
+    ``socket.getaddrinfo`` is blocking network I/O; run the check in a worker
+    thread so async callers (webhook delivery, SIEM export, admin validation)
+    never stall the event loop.
+    """
+    await asyncio.to_thread(assert_safe_url, url)

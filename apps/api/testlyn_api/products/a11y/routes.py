@@ -85,17 +85,38 @@ async def one_shot_audit(
                 detail="target URL is not allowed",
             ) from exc
 
+    # Only a queued run can be launched — without this gate the engine's
+    # /complete callback 409s (run never transitioned to 'running') and a
+    # run could be double-launched.
+    if run.state != "queued":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run is in state {run.state!r}, expected 'queued'",
+        )
+
     result = await _runner.launch(
         test_run_id=body.test_run_id,
         script_uri="",  # a11y runner uses AUDIT_CONFIG_URI from env
         vus=1,
         duration_seconds=300,
         env={
+            # The sidecar's SidecarConfig hard-requires RUN_ID + ORG_ID at
+            # startup (pydantic) — omitting ORG_ID crashes the engine container.
+            "RUN_ID": str(run.id),
+            "ORG_ID": str(project.org_id),
             "AUDIT_URLS": ",".join(str(u) for u in body.config.urls),
             "MAX_DEPTH": str(body.config.max_depth),
             "WCAG_TAGS": ",".join(body.config.wcag_tags),
         },
     )
+    # Transition the run so the engine's /complete callback (which requires
+    # state in {running, queued}) and the UI both see the launch.
+    run.state = "running"
+    run.runner_id = result.runner_id
+    run.started_at = result.started_at
+    run.region = result.region
+    await session.commit()
+
     log.info(
         "a11y.audit.enqueued",
         run_id=str(body.test_run_id),

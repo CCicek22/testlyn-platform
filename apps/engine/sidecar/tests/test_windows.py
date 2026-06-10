@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from sidecar.parsers.base import SampleEvent
-from sidecar.windows import WindowAggregator, _window_start_for
+from sidecar.windows import MAX_LATE_WINDOWS, WindowAggregator, _window_start_for
 
 
 def _ts(sec: float, subsec: float = 0.0) -> datetime:
@@ -53,18 +53,63 @@ class TestWindowBoundaries:
             closed += agg.add(_trend_event(_ts(base, sub), 100.0))
         assert closed == []  # no window closed yet (no sample from next second)
 
-    def test_next_second_closes_first_window(self) -> None:
+    def test_next_second_keeps_window_open_within_late_horizon(self) -> None:
+        """A window must stay open until it falls MORE than MAX_LATE_WINDOWS
+        behind the newest window — closing it on the very next second meant a
+        tolerated late sample could re-create (duplicate-emit) it."""
         agg = _make_aggregator()
         base = 1_715_000_000.0
         agg.add(_trend_event(_ts(base, 0.1), 100.0))
         agg.add(_trend_event(_ts(base, 0.2), 200.0))
         closed = agg.add(_trend_event(_ts(base + 1, 0.1), 300.0))
+        assert closed == []  # still within the late-sample horizon
+        remaining = agg.flush_all()
+        assert len(remaining) == 2
+
+    def test_window_closes_beyond_late_horizon(self) -> None:
+        agg = _make_aggregator()
+        base = 1_715_000_000.0
+        agg.add(_trend_event(_ts(base, 0.1), 100.0))
+        agg.add(_trend_event(_ts(base, 0.2), 200.0))
+        closed = agg.add(_trend_event(_ts(base + MAX_LATE_WINDOWS + 1, 0.1), 300.0))
         assert len(closed) == 1
         w = closed[0]
         assert w.count == 2
         assert w.min_value == pytest.approx(100.0)
         assert w.max_value == pytest.approx(200.0)
         assert w.sum_value == pytest.approx(300.0)
+
+    def test_each_window_emitted_exactly_once_with_late_samples(self) -> None:
+        """Regression for the duplicate-emission bug: a tolerated late sample
+        (within MAX_LATE_WINDOWS) must never target a window that has already
+        been emitted."""
+        agg = _make_aggregator()
+        base = 1_715_000_000.0
+        emitted: list = []
+
+        emitted += agg.add(_trend_event(_ts(base, 0.1), 100.0))
+        # Jump ahead: closes the base window (it is now > horizon behind).
+        emitted += agg.add(_trend_event(_ts(base + MAX_LATE_WINDOWS + 1, 0.1), 1.0))
+        assert len(emitted) == 1
+
+        # Late-but-tolerated sample (within the horizon of the newest window).
+        # Its window was never emitted, so no duplicate is possible.
+        emitted += agg.add(_trend_event(_ts(base + 2, 0.1), 50.0))
+        emitted += agg.flush_all()
+
+        starts = [w.window_start.isoformat() for w in emitted]
+        assert len(starts) == len(set(starts)), f"duplicate window emission: {starts}"
+        assert len(emitted) == 3  # base, base+2, base+horizon+1
+
+    def test_too_late_sample_is_dropped(self) -> None:
+        agg = _make_aggregator()
+        base = 1_715_000_000.0
+        agg.add(_trend_event(_ts(base + MAX_LATE_WINDOWS + 1, 0.1), 1.0))
+        # Older than (latest - MAX_LATE_WINDOWS) → dropped, no window created.
+        closed = agg.add(_trend_event(_ts(base, 0.1), 100.0))
+        assert closed == []
+        remaining = agg.flush_all()
+        assert len(remaining) == 1  # only the newest window exists
 
     def test_flush_all_returns_remaining(self) -> None:
         agg = _make_aggregator()

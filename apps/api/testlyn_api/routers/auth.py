@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import structlog
 from fastapi import APIRouter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from testlyn_api.config import get_settings
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.org import Organization, OrgMember
+from testlyn_api.models.user import User
 from testlyn_api.schemas.user import OrgMembershipOut, UserOut
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from testlyn_api.core.auth import CurrentUser
 
 log = structlog.get_logger(__name__)
 
@@ -70,29 +78,73 @@ async def _ensure_bootstrap_org_membership(
     await session.commit()
 
 
-@router.get("/me", response_model=UserOut)
-async def get_me(current_user: CurrentUserDep, session: SessionDep) -> UserOut:
-    from testlyn_api.models.user import User
+async def _get_or_create_user(session: AsyncSession, current_user: CurrentUser) -> User:
+    """Resolve the DB row for the authenticated principal, creating it on first login.
 
+    Lookup order:
+    1. Auth-derived id (``uuid5`` of the firebase uid) — the normal path.
+    2. Email — SCIM-provisioned rows carry a ``uuid4`` id but the same unique
+       email; adopt that row (and link the firebase uid) instead of blind-
+       INSERTing into a unique-email collision that 500s on every login.
+    3. INSERT, savepoint-guarded: two concurrent first logins both pass the
+       miss checks; the loser's IntegrityError means the row now exists, so
+       re-select instead of failing (same pattern as
+       ``_ensure_bootstrap_org_membership``).
+    """
     result = await session.execute(select(User).where(User.id == current_user.id))
     user = result.scalar_one_or_none()
 
-    if user is None:
-        from testlyn_api.models.user import User as UserModel
-
-        user = UserModel(
-            id=current_user.id,
-            email=current_user.email,
-            firebase_uid=current_user.firebase_uid,
+    if user is None and current_user.email:
+        result = await session.execute(
+            select(User).where(User.email == current_user.email)
         )
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
+        user = result.scalar_one_or_none()
+        if user is not None:
+            if current_user.firebase_uid and not user.firebase_uid:
+                user.firebase_uid = current_user.firebase_uid
+            log.info(
+                "auth.me.adopted_provisioned_user",
+                user_id=str(user.id),
+                derived_id=str(current_user.id),
+            )
+
+    if user is None:
+        try:
+            async with session.begin_nested():  # SAVEPOINT
+                session.add(
+                    User(
+                        id=current_user.id,
+                        email=current_user.email,
+                        firebase_uid=current_user.firebase_uid,
+                    )
+                )
+                await session.flush()
+        except IntegrityError:
+            # Concurrent first login already inserted the row — re-select below.
+            log.debug("auth.me.first_login_race", user_id=str(current_user.id))
+        result = await session.execute(
+            select(User).where(
+                or_(User.id == current_user.id, User.email == current_user.email)
+            )
+        )
+        user = result.scalars().first()
+        if user is None:  # pragma: no cover — insert succeeded or row exists
+            raise RuntimeError("user row unresolvable after insert")
+
+    await session.commit()
+    return user
+
+
+@router.get("/me", response_model=UserOut)
+async def get_me(current_user: CurrentUserDep, session: SessionDep) -> UserOut:
+    user = await _get_or_create_user(session, current_user)
 
     await _ensure_bootstrap_org_membership(session, user.id, user.email)
 
+    # Memberships are keyed by the DB row id — for SCIM-provisioned users this
+    # differs from the auth-derived current_user.id.
     mem_result = await session.execute(
-        select(OrgMember).where(OrgMember.user_id == current_user.id)
+        select(OrgMember).where(OrgMember.user_id == user.id)
     )
     memberships = [
         OrgMembershipOut(org_id=m.org_id, role=m.role) for m in mem_result.scalars().all()

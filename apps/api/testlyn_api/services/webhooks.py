@@ -23,15 +23,16 @@ import asyncio
 import hashlib
 import hmac
 import uuid
+from collections.abc import Coroutine
 from datetime import UTC, datetime, timedelta
-from typing import Final
+from typing import Any, Final
 
 import httpx
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url, assert_safe_url_async
 from testlyn_api.models.webhook import WebhookDelivery, WebhookEndpoint
 
 log = structlog.get_logger(__name__)
@@ -54,6 +55,41 @@ EVENTS: Final[set[str]] = {
 
 # Exponential backoff delays (seconds) before giving up.
 _RETRY_DELAYS: Final[list[int]] = [30, 120, 600, 1800, 3600]
+
+# Strong refs so fire-and-forget delivery/retry tasks aren't GC'd mid-flight
+# (same pattern as audit_siem._BACKGROUND_TASKS).
+_DELIVERY_TASKS: Final[set[asyncio.Task[None]]] = set()
+
+
+def _spawn_tracked(coro: Coroutine[Any, Any, None]) -> None:
+    """Schedule a fire-and-forget coroutine with a strong task reference.
+
+    A bare ``asyncio.create_task`` result can be garbage-collected mid-flight,
+    silently dropping the delivery; keep a module-level ref until done.
+    """
+    task = asyncio.create_task(coro)
+    _DELIVERY_TASKS.add(task)
+    task.add_done_callback(_DELIVERY_TASKS.discard)
+
+
+def _schedule_retry(delivery_id: uuid.UUID, delay: float) -> None:
+    """Schedule an in-process re-delivery attempt after ``delay`` seconds.
+
+    LIMITATION: in-process only — a pending retry is lost if the process
+    restarts or scales to zero. Production hardening is a Cloud Tasks enqueue
+    (see module TODO); ``deliver()`` is idempotent so the swap is safe. Max
+    attempts are honored by ``deliver()`` itself, which abandons past
+    ``len(_RETRY_DELAYS)`` attempts and stops re-scheduling.
+    """
+    _spawn_tracked(_retry_after(delivery_id, delay))
+
+
+async def _retry_after(delivery_id: uuid.UUID, delay: float) -> None:
+    await asyncio.sleep(delay)
+    from testlyn_api.core.db import _session_factory  # local import avoids circular
+
+    async with _session_factory() as session:
+        await WebhookDispatcher(session).deliver(delivery_id)
 
 
 def _sign(secret: str, body: bytes) -> str:
@@ -117,7 +153,7 @@ class WebhookDispatcher:
         # and would not see uncommitted rows (would silently drop the delivery).
         await self._session.commit()
         for delivery_id, url, secret in pending:
-            asyncio.create_task(  # noqa: RUF006
+            _spawn_tracked(
                 _deliver_standalone(delivery_id, url, secret, payload, event_type)
             )
         log.info(
@@ -175,6 +211,7 @@ class WebhookDispatcher:
                 delay = _RETRY_DELAYS[attempt - 1]
                 delivery.status = "failed"
                 delivery.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+                _schedule_retry(delivery.id, delay)
                 log.warning(
                     "webhooks.deliver.retry_scheduled",
                     delivery_id=str(delivery.id),
@@ -203,9 +240,10 @@ def _build_body(payload: dict, event_type: str) -> bytes:
 async def _post(url: str, body: bytes, signature: str, delivery_id: str) -> bool:
     # SSRF guard: validate the (user-supplied) target URL before any network
     # I/O. A rejection is treated as a failed delivery (return False), matching
-    # this function's bool contract — we never raise into the caller.
+    # this function's bool contract — we never raise into the caller. The async
+    # variant runs the blocking DNS resolution off the event loop.
     try:
-        _assert_safe_url(url)
+        await assert_safe_url_async(url)
     except UnsafeWebhookURL as exc:
         log.warning(
             "webhooks.ssrf_blocked", url=url, reason=str(exc), delivery_id=delivery_id
@@ -260,6 +298,7 @@ async def _deliver_standalone(
                 delay = _RETRY_DELAYS[attempt - 1]
                 delivery.status = "failed"
                 delivery.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+                _schedule_retry(delivery_id, delay)
             else:
                 delivery.status = "abandoned"
         await session.commit()

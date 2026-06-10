@@ -186,8 +186,9 @@ async def test_advisory_lock_key_is_stable_across_calls() -> None:
         bind = _FakeBind()
 
         async def execute(self, stmt):
-            text_clause = getattr(stmt, "text", None)
-            if text_clause is not None and "pg_advisory_xact_lock" in text_clause:
+            # The lock is now a SQLAlchemy select(func...) construct (§6: no
+            # raw SQL). Detect it via the compiled SQL string.
+            if "pg_advisory_xact_lock" in str(stmt):
                 # Compile with literal binds so a regression to a random Python
                 # hash() value (interpolated into the SQL) would surface here.
                 captured.append(str(stmt.compile(compile_kwargs={"literal_binds": True})))
@@ -317,3 +318,14 @@ async def test_release_usage_idempotent_floors_at_zero(db_session: AsyncSession)
         )
     ).scalar_one()
     assert record.runs_count == 0
+
+
+def test_no_raw_sql_in_quota_service() -> None:
+    """§6 hard rule: no text() raw SQL in app code — the advisory lock must be
+    a SQLAlchemy construct."""
+    import inspect
+
+    from testlyn_api.services import quota as quota_module
+
+    src = inspect.getsource(quota_module)
+    assert "text(" not in src

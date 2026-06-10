@@ -100,7 +100,10 @@ async def start_run(
     x_internal_token: str | None = Header(default=None),
 ) -> RunOut:
     _verify_internal_token(x_internal_token)
-    run = await _get_run_or_404(run_id, session)
+    # Row lock: Cloud Tasks delivers at-least-once, so two start requests for
+    # the same run can race. FOR UPDATE serializes them; the state check below
+    # runs after the lock is acquired, so the loser sees the winner's state.
+    run = await _get_run_or_404(run_id, session, for_update=True)
 
     if run.state != "queued":
         raise HTTPException(
@@ -134,6 +137,13 @@ async def start_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     org_id = str(project.org_id)
 
+    # Commit the transitional "running" state BEFORE launching the runner: a
+    # duplicate Cloud Tasks delivery arriving mid-launch then sees "running"
+    # and 409s instead of double-launching the engine job. Reverted to
+    # "failed" below if the launch errors.
+    run.state = "running"
+    await session.commit()
+
     try:
         result = await runner.launch(
             test_run_id=run.id,
@@ -146,7 +156,6 @@ async def start_run(
                 "SCRIPT_INLINE": test.script_inline or "",
             },
         )
-        run.state = "running"
         run.runner_id = result.runner_id
         run.started_at = result.started_at
         run.region = result.region
@@ -179,7 +188,9 @@ async def complete_run(
     x_internal_token: str | None = Header(default=None),
 ) -> RunOut:
     _verify_internal_token(x_internal_token)
-    run = await _get_run_or_404(run_id, session)
+    # FOR UPDATE: serialize against concurrent start/cancel/complete so the
+    # state check below reflects any concurrently-committed transition.
+    run = await _get_run_or_404(run_id, session, for_update=True)
 
     if run.state not in {"running", "queued"}:
         raise HTTPException(
@@ -238,8 +249,14 @@ async def report_ready(
     return RunOut.from_run_and_test(run, test)
 
 
-async def _get_run_or_404(run_id: uuid.UUID, session: SessionDep) -> TestRun:
-    result = await session.execute(select(TestRun).where(TestRun.id == run_id))
+async def _get_run_or_404(
+    run_id: uuid.UUID, session: SessionDep, *, for_update: bool = False
+) -> TestRun:
+    stmt = select(TestRun).where(TestRun.id == run_id)
+    if for_update:
+        # Row lock for state transitions (no-op on SQLite test backend).
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt)
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")

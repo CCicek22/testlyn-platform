@@ -17,6 +17,7 @@ behaviour (e.g. IP-based rate limit keying).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 from typing import Any
@@ -35,10 +36,12 @@ def _key(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def verify_token(token: str) -> dict[str, Any] | None:
+async def verify_token(token: str) -> dict[str, Any] | None:
     """Verify a Firebase ID token and return its claims, or ``None``.
 
-    Cached for ``_CACHE_TTL`` seconds per distinct token.
+    Cached for ``_CACHE_TTL`` seconds per distinct token. ``verify_id_token``
+    performs blocking network I/O (JWKS fetch) so it runs in a worker thread —
+    never directly on the event loop.
     """
     if not token:
         return None
@@ -52,7 +55,7 @@ def verify_token(token: str) -> dict[str, Any] | None:
     try:
         import firebase_admin.auth as fb_auth
 
-        decoded = fb_auth.verify_id_token(token)
+        decoded = await asyncio.to_thread(fb_auth.verify_id_token, token)
     except Exception as exc:  # noqa: BLE001 — verify_id_token raises many subclasses
         log.debug("token_verify.failed", error=str(exc))
         return None

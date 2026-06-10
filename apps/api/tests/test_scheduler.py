@@ -130,6 +130,161 @@ class TestCloudTarget:
         assert job.http_target.headers["X-Internal-Token"] == "tok-123"
 
 
+class _FakeJob:
+    def __init__(self, name: str, description: str = "", schedule: str = "0 * * * *",
+                 time_zone: str = "UTC") -> None:
+        self.name = name
+        self.description = description
+        self.schedule = schedule
+        self.time_zone = time_zone
+
+
+async def _aiter(jobs):
+    for job in jobs:
+        yield job
+
+
+class TestCloudTenantIsolation:
+    """Cloud-mode list/get must attribute jobs via the org marker in the job
+    description — never stamp the requesting org onto foreign jobs."""
+
+    async def test_create_writes_org_marker_in_description(self, monkeypatch):
+        from testlyn_api.services import scheduler
+
+        captured: dict = {}
+
+        class _FakeClient:
+            async def create_job(self, *, request):
+                captured["job"] = request.job
+
+        async def _fake_try(*args, **kwargs):
+            return _FakeClient()
+
+        monkeypatch.setattr(scheduler, "_try_cloud_scheduler", _fake_try)
+
+        test_id = str(uuid.uuid4())
+        await scheduler.create_schedule(
+            test_id=test_id, cron="0 * * * *", tz="UTC", org_id="org-desc"
+        )
+        desc = captured["job"].description
+        assert "org_id=org-desc" in desc
+        assert f"test_id={test_id}" in desc
+
+    async def test_list_filters_jobs_to_requesting_org(self, monkeypatch):
+        from testlyn_api.services import scheduler
+
+        prefix = "projects/p/locations/l/jobs/testlyn-sched-"
+        jobs = [
+            _FakeJob(f"{prefix}h1", "testlyn org_id=org-a test_id=t1"),
+            _FakeJob(f"{prefix}h2", "testlyn org_id=org-b test_id=t2"),
+            _FakeJob(f"{prefix}h3", ""),  # legacy job without marker
+            _FakeJob("projects/p/locations/l/jobs/unrelated", ""),
+        ]
+
+        class _FakeClient:
+            async def list_jobs(self, *, request):
+                return _aiter(jobs)
+
+        async def _fake_try(*args, **kwargs):
+            return _FakeClient()
+
+        monkeypatch.setattr(scheduler, "_try_cloud_scheduler", _fake_try)
+
+        handles = await scheduler.list_schedules("org-a")
+        assert [h.id for h in handles] == ["h1"]
+        assert handles[0].org_id == "org-a"
+        assert handles[0].test_id == "t1"
+
+        # The unmarked legacy job is attributed to NO org (no cross-tenant leak).
+        assert await scheduler.list_schedules("org-c") == []
+
+    async def test_get_schedule_reconstructs_handle_from_cloud(self, monkeypatch):
+        """Delete must work statelessly: a handle can be rebuilt from the
+        deterministically-named job + its description marker (no registry)."""
+        from testlyn_api.services import scheduler
+
+        requested: dict = {}
+
+        class _FakeClient:
+            async def get_job(self, *, request):
+                requested["name"] = request.name
+                return _FakeJob(
+                    request.name,
+                    "testlyn org_id=org-z test_id=t9",
+                    schedule="30 6 * * 1",
+                    time_zone="America/New_York",
+                )
+
+        async def _fake_try(*args, **kwargs):
+            return _FakeClient()
+
+        monkeypatch.setattr(scheduler, "_try_cloud_scheduler", _fake_try)
+
+        handle = await scheduler.get_schedule("handle-42")
+        assert handle is not None
+        assert requested["name"].endswith("testlyn-sched-handle-42")
+        assert handle.org_id == "org-z"
+        assert handle.test_id == "t9"
+        assert handle.cron == "30 6 * * 1"
+        assert handle.local is False
+
+    async def test_get_schedule_without_org_marker_returns_none(self, monkeypatch):
+        from testlyn_api.services import scheduler
+
+        class _FakeClient:
+            async def get_job(self, *, request):
+                return _FakeJob(request.name, "")  # no marker → can't authorize
+
+        async def _fake_try(*args, **kwargs):
+            return _FakeClient()
+
+        monkeypatch.setattr(scheduler, "_try_cloud_scheduler", _fake_try)
+        assert await scheduler.get_schedule("handle-x") is None
+
+
+class TestDeleteRegistryFallback:
+    """DELETE /v1/schedules/{id} must not depend on the in-process router
+    registry (empty on other instances / after restart): it falls back to
+    resolving the handle via the scheduler service."""
+
+    @pytest.fixture(autouse=True)
+    def no_gcp_creds(self):
+        import google.auth.exceptions
+
+        with patch(
+            "google.auth.default",
+            side_effect=google.auth.exceptions.DefaultCredentialsError(),
+        ):
+            yield
+
+    async def test_delete_succeeds_with_empty_registry(self, client, db_session):
+        from testlyn_api.models.project import Project
+        from testlyn_api.models.test import Test as TestModel
+        from testlyn_api.routers import schedules as schedules_router
+
+        dev_org_id = uuid.UUID("00000000-0000-0000-0000-d3eff3e10102")
+        proj = Project(org_id=dev_org_id, name="SchedP", slug=f"sched-{uuid.uuid4().hex[:6]}")
+        db_session.add(proj)
+        await db_session.flush()
+        test = TestModel(
+            project_id=proj.id, name="SchedT", script_inline="export default function(){}"
+        )
+        db_session.add(test)
+        await db_session.commit()
+
+        create_resp = await client.post(
+            f"/v1/tests/{test.id}/schedule", json={"cron": "0 * * * *"}
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        schedule_id = create_resp.json()["id"]
+
+        # Simulate another instance / a restart: in-process registry is empty.
+        schedules_router._registry.clear()
+
+        del_resp = await client.delete(f"/v1/schedules/{schedule_id}")
+        assert del_resp.status_code == 204, del_resp.text
+
+
 class TestCronValidation:
     """Validates cron expressions in the schedules router."""
 

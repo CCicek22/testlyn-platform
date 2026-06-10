@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import HTTPException, status
@@ -71,7 +72,23 @@ async def create_run_for_test(
 
     # Dispatch async — don't await (fire-and-forget via Cloud Tasks or docker).
     # Resolved through the module so tests can monkeypatch tasks.enqueue_run.
-    await tasks_module.enqueue_run(run.id)
+    try:
+        await tasks_module.enqueue_run(run.id)
+    except Exception as exc:
+        # Enqueue failed (Cloud Tasks outage, queue misconfig). Without this
+        # guard the request 500s with the run stuck "queued" and the org's
+        # quota silently consumed. Mark it failed, give the quota back, and
+        # surface a clean 502.
+        log.error("run.enqueue_failed", run_id=str(run.id), error=str(exc))
+        run.state = "failed"
+        run.error_reason = f"enqueue failed: {exc}"
+        run.finished_at = datetime.now(tz=UTC)
+        await quota.release_usage(org, run)
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to enqueue test run",
+        ) from exc
 
     log.info("run.created", run_id=str(run.id), test_id=str(test.id))
     return run, org

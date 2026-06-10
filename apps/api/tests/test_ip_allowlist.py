@@ -229,7 +229,7 @@ async def test_org_resolved_from_token_on_non_orgs_route(
     with (
         patch(
             "testlyn_api.core.token_verify.verify_token",
-            return_value={"uid": "member-uid", "email": "m@x.com"},
+            new=AsyncMock(return_value={"uid": "member-uid", "email": "m@x.com"}),
         ),
         patch(
             "testlyn_api.core.org_context.resolve_org_and_plan",

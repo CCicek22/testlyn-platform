@@ -76,12 +76,16 @@ async def test_complete_run_not_found(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_run_stops_runner_and_releases_quota(
+async def test_cancel_running_run_stops_runner_and_keeps_quota(
     client: AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cancelling a running run must call runner.cancel AND reverse quota usage."""
+    """Cancelling a RUNNING run must call runner.cancel but NOT release quota.
+
+    The run already launched and consumed engine resources — releasing quota
+    here would let users run unlimited tests by cancelling before completion.
+    """
     from datetime import UTC, datetime
 
     from sqlalchemy import select
@@ -98,7 +102,7 @@ async def test_cancel_run_stops_runner_and_releases_quota(
         "projects/p/locations/us-central1/jobs/testlyn-engine/executions/exec-1"
     )
 
-    # Record one usage unit so we can observe the release.
+    # Record one usage unit so we can observe it is NOT released.
     org = await db_session.get(Organization, _DEV_ORG_ID)
     assert org is not None
     await QuotaService(db_session).record_usage(org, run)
@@ -118,7 +122,7 @@ async def test_cancel_run_stops_runner_and_releases_quota(
     # Runner was actually stopped.
     assert cancelled == [run.runner_id]
 
-    # Quota was reversed back to 0.
+    # Quota was NOT reversed — the run launched and consumed resources.
     month = datetime.now(UTC).strftime("%Y-%m")
     record = (
         await db_session.execute(
@@ -127,19 +131,32 @@ async def test_cancel_run_stops_runner_and_releases_quota(
             )
         )
     ).scalar_one()
-    assert record.runs_count == 0
+    assert record.runs_count == 1
 
 
 @pytest.mark.asyncio
-async def test_cancel_queued_run_skips_runner_cancel(
+async def test_cancel_queued_run_skips_runner_cancel_and_releases_quota(
     client: AsyncClient,
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A still-queued run has no runner_id — runner.cancel must NOT be called."""
+    """A still-queued run has no runner_id — runner.cancel must NOT be called,
+    and quota IS released (the run never launched)."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
     from testlyn_api.core.runner_registry import RUNNERS
+    from testlyn_api.models.org import Organization
+    from testlyn_api.models.usage import UsageRecord
+    from testlyn_api.services.quota import QuotaService
 
     run_id = await _create_run(db_session)  # state defaults to queued, runner_id None
+    run = await db_session.get(TestRunModel, run_id)
+    assert run is not None
+    org = await db_session.get(Organization, _DEV_ORG_ID)
+    assert org is not None
+    await QuotaService(db_session).record_usage(org, run)
+    await db_session.commit()
 
     called: list[str] = []
 
@@ -152,6 +169,17 @@ async def test_cancel_queued_run_skips_runner_cancel(
     assert resp.status_code == 200, resp.text
     assert resp.json()["state"] == "cancelled"
     assert called == []
+
+    # Quota released — the run never launched.
+    month = datetime.now(UTC).strftime("%Y-%m")
+    record = (
+        await db_session.execute(
+            select(UsageRecord).where(
+                UsageRecord.org_id == _DEV_ORG_ID, UsageRecord.month == month
+            )
+        )
+    ).scalar_one()
+    assert record.runs_count == 0
 
 
 @pytest.mark.asyncio
@@ -277,6 +305,116 @@ async def test_internal_create_run_wrong_token_forbidden(
         headers={"X-Internal-Token": "nope"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_start_run_commits_running_before_launch(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """start_run must COMMIT state='running' BEFORE runner.launch.
+
+    Cloud Tasks delivers at-least-once: a duplicate start arriving mid-launch
+    must already see the committed 'running' state (and 409) instead of
+    double-launching the engine job.
+    """
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from testlyn_api.core.db import _session_factory
+    from testlyn_api.core.runner_registry import RUNNERS
+
+    run_id = await _create_run(db_session)
+    observed: dict[str, str] = {}
+
+    async def _fake_launch(self, **kwargs):  # type: ignore[no-untyped-def]
+        # Read the run state from a SEPARATE session — proves the transitional
+        # state was committed (visible to other transactions) before launch.
+        async with _session_factory() as other:
+            row = await other.get(TestRunModel, run_id)
+            assert row is not None
+            observed["state_during_launch"] = row.state
+        return SimpleNamespace(
+            runner_id="exec-trans-1",
+            started_at=datetime.now(tz=UTC),
+            region="us-central1",
+        )
+
+    monkeypatch.setattr(type(RUNNERS["load"]), "launch", _fake_launch, raising=True)
+
+    resp = await client.post(f"/v1/internal/runs/{run_id}/start")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["state"] == "running"
+    assert observed["state_during_launch"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_start_run_duplicate_delivery_conflicts(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Second start of the same run (duplicate Cloud Tasks delivery) → 409."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from testlyn_api.core.runner_registry import RUNNERS
+
+    run_id = await _create_run(db_session)
+    launches: list[str] = []
+
+    async def _fake_launch(self, **kwargs):  # type: ignore[no-untyped-def]
+        launches.append("launch")
+        return SimpleNamespace(
+            runner_id="exec-dup-1",
+            started_at=datetime.now(tz=UTC),
+            region="us-central1",
+        )
+
+    monkeypatch.setattr(type(RUNNERS["load"]), "launch", _fake_launch, raising=True)
+
+    first = await client.post(f"/v1/internal/runs/{run_id}/start")
+    assert first.status_code == 200, first.text
+
+    second = await client.post(f"/v1/internal/runs/{run_id}/start")
+    assert second.status_code == 409, second.text
+    assert launches == ["launch"]  # the runner launched exactly once
+
+
+@pytest.mark.asyncio
+async def test_create_run_enqueue_failure_marks_failed_and_releases_quota(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Enqueue failure → 502, run marked failed (not stuck queued), quota released."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+    from testlyn_api.core import tasks
+    from testlyn_api.models.usage import UsageRecord
+
+    async def _boom(_run_id) -> None:  # type: ignore[no-untyped-def]
+        raise RuntimeError("cloud tasks down")
+
+    monkeypatch.setattr(tasks, "enqueue_run", _boom)
+
+    test_id = await _create_test(db_session)
+    resp = await client.post(f"/v1/internal/tests/{test_id}/runs")
+    assert resp.status_code == 502, resp.text
+
+    run = (
+        await db_session.execute(
+            select(TestRunModel).where(TestRunModel.test_id == test_id)
+        )
+    ).scalar_one()
+    assert run.state == "failed"
+    assert "enqueue failed" in (run.error_reason or "")
+
+    month = datetime.now(UTC).strftime("%Y-%m")
+    record = (
+        await db_session.execute(
+            select(UsageRecord).where(
+                UsageRecord.org_id == _DEV_ORG_ID, UsageRecord.month == month
+            )
+        )
+    ).scalar_one()
+    assert record.runs_count == 0
 
 
 @pytest.mark.asyncio

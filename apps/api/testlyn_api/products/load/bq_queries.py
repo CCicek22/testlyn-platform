@@ -28,24 +28,58 @@ def _get_client(project: str) -> Any:
     _BQ_CLIENT_PROJECT = project
     return _BQ_CLIENT
 
+# samples_1s is PRE-AGGREGATED by the sidecar (see windows.py to_bq_row +
+# infra/terraform/modules/bigquery/main.tf): one row per (metric, tag_bucket,
+# 1s window) with p50/p90/p95/p99, count, delta, rate_per_sec — there is NO
+# raw `value` or `tags` column. These queries mirror the report-builder's
+# pdf.py _query_bq:
+#   * p95 latency: AVG(p95) across tag buckets WHERE metric='http_req_duration'
+#   * error rate: http_req_failed is a k6 'rate' metric — per row `count` is
+#     total observations and `delta` is the failure count, so the volume-
+#     weighted fraction is SAFE_DIVIDE(SUM(delta), SUM(count))
+#   * vus: gauge metric — `delta` carries the latest value per window
 _STREAM_METRICS_SQL = """
+WITH latency AS (
+  SELECT
+    TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
+    AVG(p95) AS p95_duration_ms
+  FROM `{project}.{dataset}.samples_1s`
+  WHERE run_id = @run_id
+    AND metric = 'http_req_duration'
+    AND DATE(window_start) = CURRENT_DATE()
+    AND window_start >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 SECOND)
+  GROUP BY ts
+),
+errors AS (
+  SELECT
+    TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
+    SAFE_DIVIDE(SUM(delta), SUM(count)) AS error_rate
+  FROM `{project}.{dataset}.samples_1s`
+  WHERE run_id = @run_id
+    AND metric = 'http_req_failed'
+    AND DATE(window_start) = CURRENT_DATE()
+    AND window_start >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 SECOND)
+  GROUP BY ts
+),
+vus AS (
+  SELECT
+    TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
+    MAX(delta) AS vus
+  FROM `{project}.{dataset}.samples_1s`
+  WHERE run_id = @run_id
+    AND metric = 'vus'
+    AND DATE(window_start) = CURRENT_DATE()
+    AND window_start >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 SECOND)
+  GROUP BY ts
+)
 SELECT
-  TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
-  APPROX_QUANTILES(
-    CASE WHEN metric = 'http_req_duration' THEN value END,
-    100
-  )[OFFSET(95)] AS p95_duration_ms,
-  SAFE_DIVIDE(
-    COUNTIF(metric = 'http_reqs' AND JSON_VALUE(tags, '$.expected_response') = 'false'),
-    NULLIF(COUNTIF(metric = 'http_reqs'), 0)
-  ) AS error_rate,
-  MAX(CASE WHEN metric = 'vus' THEN value END) AS vus
-FROM `{project}.{dataset}.samples_1s`
-WHERE
-  run_id = @run_id
-  AND DATE(window_start) = CURRENT_DATE()
-  AND window_start >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 60 SECOND)
-GROUP BY ts
+  l.ts,
+  l.p95_duration_ms,
+  COALESCE(e.error_rate, 0) AS error_rate,
+  COALESCE(v.vus, 0) AS vus
+FROM latency l
+LEFT JOIN errors e ON l.ts = e.ts
+LEFT JOIN vus v ON l.ts = v.ts
 ORDER BY ts ASC
 """
 
@@ -57,20 +91,41 @@ ORDER BY ts ASC
 MAX_SAMPLE_ROWS = 86_400
 
 _RUN_SAMPLES_SQL = """
+WITH latency AS (
+  SELECT
+    TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
+    AVG(p95) AS p95_duration_ms
+  FROM `{project}.{dataset}.samples_1s`
+  WHERE run_id = @run_id
+    AND metric = 'http_req_duration'
+  GROUP BY ts
+),
+errors AS (
+  SELECT
+    TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
+    SAFE_DIVIDE(SUM(delta), SUM(count)) AS error_rate
+  FROM `{project}.{dataset}.samples_1s`
+  WHERE run_id = @run_id
+    AND metric = 'http_req_failed'
+  GROUP BY ts
+),
+vus AS (
+  SELECT
+    TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
+    MAX(delta) AS vus
+  FROM `{project}.{dataset}.samples_1s`
+  WHERE run_id = @run_id
+    AND metric = 'vus'
+  GROUP BY ts
+)
 SELECT
-  TIMESTAMP_TRUNC(window_start, SECOND) AS ts,
-  APPROX_QUANTILES(
-    CASE WHEN metric = 'http_req_duration' THEN value END,
-    100
-  )[OFFSET(95)] AS p95_duration_ms,
-  SAFE_DIVIDE(
-    COUNTIF(metric = 'http_reqs' AND JSON_VALUE(tags, '$.expected_response') = 'false'),
-    NULLIF(COUNTIF(metric = 'http_reqs'), 0)
-  ) AS error_rate,
-  MAX(CASE WHEN metric = 'vus' THEN value END) AS vus
-FROM `{project}.{dataset}.samples_1s`
-WHERE run_id = @run_id
-GROUP BY ts
+  l.ts,
+  l.p95_duration_ms,
+  COALESCE(e.error_rate, 0) AS error_rate,
+  COALESCE(v.vus, 0) AS vus
+FROM latency l
+LEFT JOIN errors e ON l.ts = e.ts
+LEFT JOIN vus v ON l.ts = v.ts
 ORDER BY ts ASC
 LIMIT {max_rows}
 """

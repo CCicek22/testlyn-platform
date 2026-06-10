@@ -6,7 +6,7 @@ import { api } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getProduct } from "@/lib/products";
-import type { TestRun, RunState, A11yRunSummary } from "@testlyn/shared";
+import type { TestRun, RunState } from "@testlyn/shared";
 
 const PRODUCT = "a11y";
 const ACCENT = getProduct(PRODUCT).accent; // #5CFF93
@@ -14,8 +14,8 @@ const ACCENT = getProduct(PRODUCT).accent; // #5CFF93
 const STATE_STYLES: Record<RunState, string> = {
   queued:    "border-zinc-700 bg-zinc-800 text-zinc-400",
   running:   "border-teal-500/30 bg-teal-500/10 text-teal-400",
-  done:      "border-success/30 bg-success/10 text-success",
-  error:     "border-alert/30 bg-alert/10 text-alert",
+  completed: "border-success/30 bg-success/10 text-success",
+  failed:    "border-alert/30 bg-alert/10 text-alert",
   cancelled: "border-zinc-700 bg-zinc-800 text-zinc-400",
 };
 
@@ -49,11 +49,10 @@ export default function A11yRunPage() {
     },
   });
 
-  const { data: summary } = useQuery<A11yRunSummary>({
-    queryKey: ["run-summary", runId, PRODUCT],
-    queryFn: () => api.runs.summary(runId, PRODUCT) as Promise<A11yRunSummary>,
-    enabled: !!run && (run.state === "done" || run.state === "error"),
-  });
+  // NOTE: api.runs.summary() only returns {run_id, summary_uri, state,
+  // error_reason} — urls_scanned / per-severity violation counts are not
+  // exposed by the backend yet, so the cards below render explicit
+  // placeholders until the A11y runner (W2C) ships result streaming.
 
   if (error) {
     return (
@@ -98,27 +97,18 @@ export default function A11yRunPage() {
             <Badge className="border-zinc-700 bg-zinc-800 font-mono text-xs text-zinc-400">{runId}</Badge>
           )}
           {!isLoading && (
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATE_STYLES[state]}`}>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATE_STYLES[state] ?? STATE_STYLES.queued}`}>
               {state.charAt(0).toUpperCase() + state.slice(1)}
             </span>
           )}
         </div>
 
-        {summary && (
-          <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-            <p className="text-xs text-zinc-500">URLs scanned</p>
-            <p className="mt-1 font-mono text-2xl font-bold" style={{ color: ACCENT }}>
-              {summary.urls_scanned}
-            </p>
-          </div>
-        )}
-
-        {/* WCAG violation breakdown */}
+        {/* WCAG violation breakdown — counts not yet available from the backend */}
         <div className="grid grid-cols-2 gap-3 mb-6 sm:grid-cols-4">
-          <ViolationCard level="Critical"  count={summary?.violations_critical  ?? "—"} colorClass="text-alert" />
-          <ViolationCard level="Serious"   count={summary?.violations_serious   ?? "—"} colorClass="text-warn" />
-          <ViolationCard level="Moderate"  count={summary?.violations_moderate  ?? "—"} colorClass="text-zinc-300" />
-          <ViolationCard level="Minor"     count={summary?.violations_minor     ?? "—"} colorClass="text-zinc-500" />
+          <ViolationCard level="Critical"  count="—" colorClass="text-alert" />
+          <ViolationCard level="Serious"   count="—" colorClass="text-warn" />
+          <ViolationCard level="Moderate"  count="—" colorClass="text-zinc-300" />
+          <ViolationCard level="Minor"     count="—" colorClass="text-zinc-500" />
         </div>
 
         {state === "running" || state === "queued" ? (

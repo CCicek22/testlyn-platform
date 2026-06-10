@@ -27,6 +27,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.core.permissions import perm_dep
+from testlyn_api.core.url_safety import UnsafeURL, assert_safe_url_async
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.models.audit_log import AuditLog
 from testlyn_api.models.audit_siem_sink import SINK_KINDS, AuditSiemSink
@@ -378,6 +379,21 @@ async def create_sink(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"kind must be one of {SINK_KINDS}",
         )
+    # SSRF guard: the sink URL is org-supplied and the export POSTs to it
+    # server-side — validate it like webhook destinations (same policy).
+    url = str(body.config.get("url") or "")
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="config.url is required",
+        )
+    try:
+        await assert_safe_url_async(url)
+    except UnsafeURL as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsafe sink URL: {exc}",
+        ) from exc
     sink = AuditSiemSink(
         org_id=org_id,
         kind=body.kind,

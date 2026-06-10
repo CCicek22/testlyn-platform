@@ -100,6 +100,52 @@ class TestSecurityRunnerProtocol:
         assert result.region == "local"
 
     @pytest.mark.asyncio
+    async def test_launch_subprocess_zap_sh_not_fed_to_python3(self) -> None:
+        """Review finding: zap.sh (a shell launcher) was executed as
+        ["python3", "zap.sh", ...] → instant SyntaxError. It must run directly;
+        only zap-baseline.py goes through python3."""
+        from unittest.mock import AsyncMock, patch
+
+        from testlyn_api.products.security import runner as runner_mod
+        from testlyn_api.products.security.runner import SecurityRunner
+
+        runner = SecurityRunner()
+        run_id = uuid.uuid4()
+
+        fake_proc = AsyncMock()
+        fake_proc.communicate.return_value = (b"", b"")
+        fake_proc.returncode = 0
+
+        def _which(name: str) -> str | None:
+            return "/usr/local/bin/zap.sh" if name == "zap.sh" else None
+
+        with (
+            patch("shutil.which", side_effect=_which),
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_proc)),
+            patch.object(runner_mod.log, "info") as mock_info,
+            patch("httpx.AsyncClient"),
+        ):
+            await runner.launch(
+                test_run_id=run_id,
+                script_uri="",
+                vus=1,
+                duration_seconds=60,
+                env={"TARGET_URL": "https://example.com", "SCAN_KIND": "baseline"},
+            )
+            for task in list(runner_mod._background_tasks):
+                await task
+
+        captured_cmd: list[str] = []
+        for call in mock_info.call_args_list:
+            if call.args and call.args[0] == "security_runner.subprocess_launch":
+                captured_cmd = call.kwargs["cmd"]
+                break
+
+        assert captured_cmd, "expected subprocess_launch log with cmd"
+        assert captured_cmd[0] == "/usr/local/bin/zap.sh"
+        assert "python3" not in captured_cmd
+
+    @pytest.mark.asyncio
     async def test_cancel_docker_noop(self) -> None:
         from testlyn_api.products.security.runner import SecurityRunner
 
@@ -200,7 +246,8 @@ async def test_scan_baseline_returns_202(client: AsyncClient, dev_org_id: uuid.U
     assert response.status_code == 202
     data = response.json()
     assert data["product"] == "security"
-    assert data["status"] == "queued"
+    # A real TestRun row is created and transitioned on launch now.
+    assert data["status"] == "running"
     assert data["scan_kind"] == "baseline"
     assert data["findings_count"] == 0
     assert "scan_id" in data
@@ -242,4 +289,4 @@ async def test_scan_with_auth_recipe(client: AsyncClient, dev_org_id: uuid.UUID)
         )
     assert response.status_code == 202
     data = response.json()
-    assert data["status"] == "queued"
+    assert data["status"] == "running"

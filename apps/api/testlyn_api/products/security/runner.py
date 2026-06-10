@@ -110,9 +110,14 @@ class SecurityRunner:
         ) as report_file:
             report_path = report_file.name
 
-        cmd = [
-            "python3",
-            zap_script,
+        # zap-baseline.py is a Python script (run via python3); zap.sh is a
+        # shell launcher and must be executed directly — feeding it to python3
+        # raises an instant SyntaxError.
+        if zap_script.endswith(".py"):
+            cmd = ["python3", zap_script]
+        else:
+            cmd = [zap_script]
+        cmd += [
             "-t",
             target_url,
             "-J",

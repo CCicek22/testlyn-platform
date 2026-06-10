@@ -178,10 +178,17 @@ async def cancel_run(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> RunOut:
-    """Cancel a queued or running test run."""
+    """Cancel a queued or running test run.
+
+    Quota is only released for runs that never launched (still queued, no
+    runner_id) — a run that reached "running" consumed engine resources and
+    keeps its quota charge.
+    """
     from datetime import UTC, datetime
 
-    run = await _get_run_or_404(run_id, session)
+    # FOR UPDATE: serialize against a concurrent complete/start so we can't
+    # overwrite a concurrently-committed terminal state with "cancelled".
+    run = await _get_run_or_404(run_id, session, for_update=True)
     test = await session.get(Test, run.test_id)
     if test is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test not found")
@@ -195,6 +202,11 @@ async def cancel_run(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Run is in state {run.state!r} and cannot be cancelled",
         )
+
+    # Captured before mutation: quota is released only for runs that never
+    # launched. Releasing for running runs let users burn engine time for free
+    # by cancelling just before completion.
+    never_launched = run.state == "queued" and run.runner_id is None
 
     # Stop the underlying runner so the Cloud Run Job actually halts instead of
     # continuing to stream to BQ and burn quota. runner_id is None while still
@@ -217,11 +229,12 @@ async def cancel_run(
     run.state = "cancelled"
     run.finished_at = datetime.now(tz=UTC)
 
-    # Reverse the usage we recorded at create_run time — a cancelled run never
-    # consumed its quota. Idempotent.
-    org = await session.get(Organization, project.org_id)
-    if org is not None:
-        await QuotaService(session).release_usage(org, run)
+    # Reverse the usage recorded at create_run time ONLY when the run never
+    # launched — it consumed nothing. Idempotent.
+    if never_launched:
+        org = await session.get(Organization, project.org_id)
+        if org is not None:
+            await QuotaService(session).release_usage(org, run)
 
     await session.commit()
     await session.refresh(run)
@@ -238,8 +251,14 @@ async def _get_test_or_404(test_id: uuid.UUID, session: SessionDep) -> Test:
     return test
 
 
-async def _get_run_or_404(run_id: uuid.UUID, session: SessionDep) -> TestRun:
-    result = await session.execute(select(TestRun).where(TestRun.id == run_id))
+async def _get_run_or_404(
+    run_id: uuid.UUID, session: SessionDep, *, for_update: bool = False
+) -> TestRun:
+    stmt = select(TestRun).where(TestRun.id == run_id)
+    if for_update:
+        # Row lock for state transitions (no-op on SQLite test backend).
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt)
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")

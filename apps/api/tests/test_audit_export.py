@@ -16,7 +16,9 @@ from __future__ import annotations
 import csv
 import io
 import json
+import socket
 import uuid
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -25,6 +27,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.models.audit_log import AuditLog
 from testlyn_api.models.audit_siem_sink import AuditSiemSink
 from testlyn_api.models.org import Organization, OrgMember
+
+# Sink URLs are now SSRF-validated (DNS resolved) at create time — resolve
+# every hostname to a public IP so tests pass offline in CI.
+_PUBLIC_ADDRINFO = [
+    (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+]
+
+
+@pytest.fixture(autouse=True)
+def _mock_public_dns():
+    with patch("socket.getaddrinfo", return_value=_PUBLIC_ADDRINFO):
+        yield
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -559,3 +574,70 @@ async def test_backfill_recent_returns_count(
     count = await backfill_recent(sink, "2000-01-01T00:00:00", db_session)
     assert count == 3
     assert len(exported) == 3
+
+
+# ── SIEM sink SSRF guard ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://metadata.google.internal/x",
+        "file:///etc/passwd",
+    ],
+)
+async def test_create_sink_rejects_ssrf_url(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    bad_url: str,
+) -> None:
+    """Even an owner cannot register an internal/metadata sink destination."""
+    org_id = await _create_org(client, "SinkSsrfOrg")
+    resp = await client.post(
+        f"/v1/orgs/{org_id}/audit-sinks",
+        json={"kind": "generic_https", "config": {"url": bad_url}},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_create_sink_requires_url(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    org_id = await _create_org(client, "SinkNoUrlOrg")
+    resp = await client.post(
+        f"/v1/orgs/{org_id}/audit-sinks",
+        json={"kind": "generic_https", "config": {}},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_export_event_blocks_unsafe_url(db_session: AsyncSession) -> None:
+    """Defense in depth: export re-validates the URL at send time and never
+    POSTs to an unsafe destination (covers sinks created before validation)."""
+    from unittest.mock import MagicMock
+
+    from testlyn_api.core.url_safety import UnsafeURL
+    from testlyn_api.services.audit_siem import export_event
+
+    org = Organization(name="SsrfSinkOrg", slug=f"ssrf-{uuid.uuid4().hex[:6]}")
+    db_session.add(org)
+    await db_session.flush()
+    sink = AuditSiemSink(
+        org_id=org.id,
+        kind="generic_https",
+        config={"url": "http://169.254.169.254/exfil"},
+        active=True,
+    )
+    db_session.add(sink)
+    await db_session.commit()
+
+    with patch("httpx.AsyncClient", new=MagicMock()) as mock_client:
+        with pytest.raises(UnsafeURL):
+            await export_event(sink, {"id": "e1", "org_id": str(org.id), "action": "x"})
+
+    mock_client.assert_not_called()

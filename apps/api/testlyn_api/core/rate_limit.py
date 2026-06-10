@@ -253,7 +253,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # --- Bearer JWT (verified) ---
         token = extract_bearer(request.headers.get("Authorization", ""))
         if token is not None:
-            claims = verify_token(token)
+            claims = await verify_token(token)
             if claims is not None:
                 # Firebase verified tokens expose the user id as ``uid``; accept
                 # the standard JWT ``sub``/``user_id`` aliases defensively.

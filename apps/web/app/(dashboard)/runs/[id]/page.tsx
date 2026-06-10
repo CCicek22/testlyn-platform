@@ -2,18 +2,19 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api-client";
 import { useSSE } from "@/lib/sse";
+import { mapFrameMetrics } from "@/lib/run-stream";
 import { LiveLatencyChart } from "@/components/charts/live-latency-chart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { TestRun, LiveSample, SSEEventPayload, RunState } from "@testlyn/shared";
+import type { TestRun, LiveSample, RunStreamFrame, RunState } from "@testlyn/shared";
 
 const TERMINAL_STATES: ReadonlySet<RunState> = new Set([
-  "done",
-  "error",
+  "completed",
+  "failed",
   "cancelled",
 ]);
 
@@ -38,13 +39,13 @@ const STATE_CONFIG: Record<
     color: "border-primary/30 bg-primary/10 text-primary",
     dotColor: "bg-primary animate-pulse",
   },
-  done: {
-    label: "Done",
+  completed: {
+    label: "Completed",
     color: "border-success/30 bg-success/10 text-success",
     dotColor: "bg-success",
   },
-  error: {
-    label: "Error",
+  failed: {
+    label: "Failed",
     color: "border-alert/30 bg-alert/10 text-alert",
     dotColor: "bg-alert",
   },
@@ -56,7 +57,8 @@ const STATE_CONFIG: Record<
 };
 
 function RunStateBadge({ state }: { state: RunState }) {
-  const cfg = STATE_CONFIG[state];
+  // Fallback guards against unknown wire values crashing the page.
+  const cfg = STATE_CONFIG[state] ?? STATE_CONFIG.queued;
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${cfg.color}`}
@@ -142,16 +144,21 @@ export default function RunPage() {
       ? api.runs.streamUrl(runId)
       : null;
 
-  const onMessage = useCallback((payload: SSEEventPayload) => {
-    if (payload.type === "sample") {
+  // Dedupe set + last-seen state for the SSE stream: each frame re-sends the
+  // last-60s metric window, and every frame carries `state`.
+  const seenTsRef = useRef<Set<string>>(new Set());
+  const lastStreamStateRef = useRef<RunState | null>(null);
+
+  const onMessage = useCallback((frame: RunStreamFrame) => {
+    const fresh = mapFrameMetrics(frame, seenTsRef.current);
+    if (fresh.length > 0) {
       // Cap to a sliding window of the last hour of 1-Hz samples so memory
       // stays bounded on long-running tests.
-      setSamples((prev) => [...prev, payload.data].slice(-3600));
-    } else if (payload.type === "state") {
-      setLiveState(payload.data.state);
-      void qc.invalidateQueries({ queryKey: ["run", runId] });
-    } else if (payload.type === "done") {
-      setLiveState("done");
+      setSamples((prev) => [...prev, ...fresh].slice(-3600));
+    }
+    if (frame.state !== lastStreamStateRef.current) {
+      lastStreamStateRef.current = frame.state;
+      setLiveState(frame.state);
       void qc.invalidateQueries({ queryKey: ["run", runId] });
     }
   }, [qc, runId]);
@@ -160,11 +167,17 @@ export default function RunPage() {
     setSseError("Live stream disconnected — retrying…");
   }, []);
 
+  // Server sent `event: done` — the run reached a terminal state (or the
+  // stream hit its tick cap); refetch the run to pick up the final state.
+  // Clear a stale non-terminal live state so it can't mask the polled state
+  // (the last tick may have yielded no metrics frame).
   const onDone = useCallback(() => {
     setSseError(null);
-  }, []);
+    setLiveState((prev) => (prev && TERMINAL_STATES.has(prev) ? prev : null));
+    void qc.invalidateQueries({ queryKey: ["run", runId] });
+  }, [qc, runId]);
 
-  useSSE<SSEEventPayload>(streamUrl, {
+  useSSE<RunStreamFrame>(streamUrl, {
     onMessage,
     onError: onSSEError,
     onDone,
@@ -326,7 +339,7 @@ export default function RunPage() {
             </div>
           ) : (
             <p className="text-sm text-zinc-400">
-              {effectiveState === "error"
+              {effectiveState === "failed"
                 ? `Run failed${
                     summary?.error_reason ?? run?.error_reason
                       ? `: ${summary?.error_reason ?? run?.error_reason}`

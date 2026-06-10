@@ -42,7 +42,7 @@ class TestBatching:
 
         flushed: list[list[dict]] = []
 
-        async def fake_insert(rows: list, *, table_id: str) -> None:
+        async def fake_insert(rows: list, *, table_id: str, kind: str = "samples_1s") -> None:
             flushed.append(rows)
 
         with patch.object(writer, "_insert_with_retry", side_effect=fake_insert):
@@ -68,7 +68,7 @@ class TestBatching:
 
         flushed: list[list[dict]] = []
 
-        async def fake_insert(rows: list, *, table_id: str) -> None:
+        async def fake_insert(rows: list, *, table_id: str, kind: str = "samples_1s") -> None:
             flushed.append(rows)
 
         with patch.object(writer, "_insert_with_retry", side_effect=fake_insert):
@@ -94,7 +94,7 @@ class TestRetryAndSpool:
 
         spooled: list[list[dict]] = []
 
-        async def fake_spool_write(rows: list, *, poison: bool = False) -> None:
+        async def fake_spool_write(rows: list, *, poison: bool = False, kind: str = "samples_1s") -> None:
             spooled.append(rows)
 
         with patch.object(spool, "write", side_effect=fake_spool_write):
@@ -124,7 +124,7 @@ class TestRetryAndSpool:
 
         poison_calls: list[dict] = []
 
-        async def fake_spool_write(rows: list, *, poison: bool = False) -> None:
+        async def fake_spool_write(rows: list, *, poison: bool = False, kind: str = "samples_1s") -> None:
             if poison:
                 poison_calls.extend(rows)
 
@@ -161,7 +161,7 @@ class TestSpoolReplay:
 
         replayed: list[list[dict]] = []
 
-        async def fake_insert(rows: list, *, table_id: str) -> None:
+        async def fake_insert(rows: list, *, table_id: str, kind: str = "samples_1s") -> None:
             replayed.append(rows)
 
         with patch.object(writer, "_insert_with_retry", side_effect=fake_insert):

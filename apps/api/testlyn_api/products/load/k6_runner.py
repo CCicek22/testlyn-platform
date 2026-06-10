@@ -104,12 +104,20 @@ class K6Runner:
         # Cloud k6 downloads its script from GCS; the engine entrypoint
         # hard-requires SCRIPT_GCS_URI. A test created with only an inline script
         # has no script_uri yet, so persist it to the scripts bucket now.
+        # SCRIPT_INLINE is popped out of env: the engine never reads it, and a
+        # large script in a Cloud Run Job env override fails the launch with
+        # InvalidArgument (env value size limits).
+        env = dict(env)
+        inline = env.pop("SCRIPT_INLINE", "")
         script_gcs_uri = script_uri
         if not script_gcs_uri:
-            inline = env.get("SCRIPT_INLINE", "")
             if not inline:
                 raise ValueError(
                     "load run has neither script_uri nor an inline script to upload"
+                )
+            if len(inline.encode("utf-8")) > _MAX_SCRIPT_BYTES:
+                raise ValueError(
+                    f"inline k6 script exceeds {_MAX_SCRIPT_BYTES} bytes"
                 )
             script_gcs_uri = await self._upload_inline_script(test_run_id, inline)
 

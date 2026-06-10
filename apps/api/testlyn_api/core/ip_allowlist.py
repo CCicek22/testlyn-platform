@@ -82,7 +82,7 @@ async def _extract_org_id(request: Request) -> str | None:
 
     token = extract_bearer(request.headers.get("Authorization", ""))
     if token is not None:
-        claims = verify_token(token)
+        claims = await verify_token(token)
         if claims is not None:
             uid = claims.get("uid") or claims.get("user_id") or claims.get("sub")
             if uid:
