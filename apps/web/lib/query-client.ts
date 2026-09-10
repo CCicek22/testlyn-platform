@@ -9,12 +9,26 @@ import { UnauthenticatedError } from "@/lib/api-client";
  * restore — getIdToken() now awaits authStateReady(), but we still don't
  * retry on auth failures so the UI surfaces them cleanly.
  */
+export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
+  if (error instanceof UnauthenticatedError) {
+    return false;
+  }
+  return failureCount < 1;
+}
+
+/**
+ * Bounded exponential backoff delay for retries to prevent retry storms.
+ */
+export function defaultRetryDelay(attemptIndex: number): number {
+  return Math.min(1000 * 2 ** attemptIndex, 10_000);
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: (failureCount, error) =>
-        error instanceof UnauthenticatedError ? false : failureCount < 1,
+      retry: shouldRetryQuery,
+      retryDelay: defaultRetryDelay,
       refetchOnWindowFocus: false,
     },
   },

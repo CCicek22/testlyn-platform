@@ -96,6 +96,28 @@ class Settings(BaseSettings):
 
     # --- Web ---
     web_base_url: str = "http://localhost:3000"
+    # Allowed CORS origins for browser preflights. Both apex (https://testlyn.example.com)
+    # and dev (https://dev.testlyn.example.com) hostnames serve the same deployment; both
+    # must be allowed so preflight checks pass. Stored comma-separated for
+    # gcloud --update-env-vars compatibility.
+    # When empty, falls back to [web_base_url] to preserve local dev and test defaults.
+    # Origins are scheme + host + optional port, never a trailing slash: a browser's
+    # Origin header carries no path, so "https://testlyn.example.com/" never matches.
+    cors_allowed_origins_raw: str = ""
+
+    @property
+    def cors_allowed_origins(self) -> list[str]:
+        """Parse CORS_ALLOWED_ORIGINS_RAW into a deduplicated list of origins."""
+        if not self.cors_allowed_origins_raw.strip():
+            return [self.web_base_url]
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in self.cors_allowed_origins_raw.split(","):
+            origin = item.strip()
+            if origin and origin not in seen:
+                seen.add(origin)
+                out.append(origin)
+        return out if out else [self.web_base_url]
 
     # --- Gemini / Vertex AI ---
     gemini_model: str = "gemini-3.1-flash-lite"

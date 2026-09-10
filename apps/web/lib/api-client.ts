@@ -49,7 +49,18 @@ async function request<T>(
   headers.set("Content-Type", "application/json");
   headers.set("Authorization", `Bearer ${token}`);
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new TypeError(
+        `Network or CORS error connecting to ${BASE_URL}: ${err.message}`,
+        { cause: err }
+      );
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     let body: unknown;
@@ -80,7 +91,18 @@ async function requestRaw(path: string, init: RequestInit = {}): Promise<Respons
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new TypeError(
+        `Network or CORS error connecting to ${BASE_URL}: ${err.message}`,
+        { cause: err }
+      );
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     let body: unknown;

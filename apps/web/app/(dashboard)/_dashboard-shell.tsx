@@ -201,7 +201,12 @@ export default function DashboardShell({
 
   // Membership lookup powers the org-guard below. Shares the ["me"] query key
   // with the dashboard pages, so this adds no extra network round-trip.
-  const { data: me, isLoading: meLoading } = useQuery<MeResponse>({
+  const {
+    data: me,
+    isLoading: meLoading,
+    error: meError,
+    refetch: refetchMe,
+  } = useQuery<MeResponse>({
     queryKey: ["me"],
     queryFn: () => api.me(),
     enabled: user != null,
@@ -242,6 +247,52 @@ export default function DashboardShell({
     </div>
   );
 
+  async function handleSignOut() {
+    await signOutUser();
+    window.location.href = "/login";
+  }
+
+  // Surface hard network/CORS or API failures as a visible error state rather
+  // than an endless loader screen or broken child skeletons that trigger retry floods.
+  // Gate on `me == null` — React Query keeps the last good `data` when a
+  // background refetch fails (verified on v5: status "error" with data still
+  // present), so without this a transient refetch failure (reconnect after
+  // sleep, a cold-start 503, the ["me"] invalidation on org creation) would
+  // unmount a working dashboard and lose in-progress editor state.
+  if (user && meError && me == null) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-dark px-4 text-zinc-100">
+        <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950/80 p-6 text-center shadow-xl">
+          <div className="mb-4 flex justify-center">
+            <LogoPulse size={32} wordmark={false} />
+          </div>
+          <h2 className="text-lg font-semibold text-zinc-100">Unable to load dashboard</h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            {meError instanceof Error
+              ? meError.message
+              : "Failed to connect to the Testlyn API. Check your network connection or CORS settings."}
+          </p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void refetchMe()}
+              className="rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-zinc-700"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="rounded-lg border border-zinc-800 px-4 py-2 text-sm font-medium text-zinc-400 transition hover:bg-zinc-900 hover:text-zinc-200"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Onboarding renders on a clean, sidebar-free canvas (the page owns its
   // centered card layout). No dead nav links for a user without an org yet.
   // Gate on membership resolution: while `me` is still loading — or for an
@@ -269,11 +320,6 @@ export default function DashboardShell({
   // skeleton flash.
   if (user && (meLoading || hasNoOrg)) {
     return loaderScreen;
-  }
-
-  async function handleSignOut() {
-    await signOutUser();
-    window.location.href = "/login";
   }
 
   return (
