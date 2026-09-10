@@ -28,10 +28,43 @@ const DEV_BYPASS =
 let app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 
+/**
+ * Resolve the authDomain for the host the app is actually being served from.
+ *
+ * Firebase builds the popup URL as `https://<authDomain>/__/auth/handler`. For
+ * signInWithPopup to survive COOP, that handler must be same-origin with the
+ * page — which is why next.config.ts rewrites `/__/auth/*` onto the app's own
+ * origin. The rewrite applies to whatever host serves the app, so the correct
+ * authDomain is simply the host the user is on.
+ *
+ * The app is served on two hostnames (testlyn.example.com and
+ * dev.testlyn.example.com both map to testlyn-web) but
+ * NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN is a single value baked in at build time, so
+ * any static choice is cross-origin — and therefore COOP-broken — on the other
+ * one. Reading the host at runtime is what makes both work from one build.
+ *
+ * Falls back to the configured value when there is no window (SSR/prerender)
+ * and on non-HTTPS origins: local dev runs on http://localhost:3000 and
+ * `hostname` drops the port, which would yield https://localhost/__/auth/handler.
+ *
+ * The serving host must be an authorized domain in Identity Platform; both
+ * testlyn.example.com and dev.testlyn.example.com already are.
+ */
+export function resolveAuthDomain(
+  configured: string | undefined = process.env[
+    "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"
+  ],
+  loc: { protocol: string; hostname: string } | undefined =
+    typeof window === "undefined" ? undefined : window.location,
+): string | undefined {
+  if (!loc || loc.protocol !== "https:") return configured;
+  return loc.hostname;
+}
+
 if (!DEV_BYPASS) {
   const firebaseConfig = {
     apiKey: process.env["NEXT_PUBLIC_FIREBASE_API_KEY"],
-    authDomain: process.env["NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"],
+    authDomain: resolveAuthDomain(),
     projectId: process.env["NEXT_PUBLIC_FIREBASE_PROJECT_ID"],
     storageBucket: process.env["NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET"],
     messagingSenderId: process.env["NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"],
