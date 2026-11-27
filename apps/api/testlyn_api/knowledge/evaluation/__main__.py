@@ -24,7 +24,7 @@ from testlyn_api.knowledge.embeddings import (
     OpenAICompatEmbedder,
 )
 from testlyn_api.knowledge.evaluation.dataset import DatasetError, load_eval_set
-from testlyn_api.knowledge.evaluation.judge import JudgeModel, VertexJudgeModel
+from testlyn_api.knowledge.evaluation.judge import VertexJudgeModel
 from testlyn_api.knowledge.evaluation.report import render_markdown
 from testlyn_api.knowledge.evaluation.runner import EvaluationRefused, run_evaluation
 from testlyn_api.models.knowledge import KNOWLEDGE_EMBEDDING_DIM
@@ -87,7 +87,7 @@ def _build_embedder(args: argparse.Namespace) -> HashingEmbedder | OpenAICompatE
     )
 
 
-def _build_judge(args: argparse.Namespace) -> JudgeModel | None:
+def _build_judge(args: argparse.Namespace) -> VertexJudgeModel | None:
     if not args.judge:
         return None
     if not args.judge_model:
@@ -121,6 +121,9 @@ async def _run(args: argparse.Namespace) -> int:
     engine = create_async_engine(args.database_url, poolclass=NullPool)
     try:
         await _check_migrated(engine)
+        if judge is not None:
+            # Load the SDK outside any per-call deadline.
+            await judge.prepare()
         report = await run_evaluation(
             engine, dataset=dataset, embedder=embedder, judge=judge
         )

@@ -35,6 +35,9 @@ MAX_CLAIMS = 20
 MAX_CLAIM_CHARS = 300
 DEFAULT_DEADLINE_S = 30.0
 DEFAULT_CONCURRENCY = 4
+# Verdicts are short JSON: deterministic sampling, bounded output.
+JUDGE_TEMPERATURE = 0.0
+JUDGE_MAX_OUTPUT_TOKENS = 1024
 
 RELEVANCE_KEYS = frozenset({"relevant", "score", "reason"})
 FAITHFULNESS_KEYS = frozenset({"faithful", "unsupported_claims", "score"})
@@ -360,23 +363,39 @@ class VertexJudgeModel:
     """Adapter over the Vertex AI Gemini client the API already uses.
 
     Same SDK as ``services/gemini.py``. Only the ``--judge`` path builds one.
+    Call ``prepare`` before judging: loading the SDK is then outside every
+    call's deadline. ``prepare`` loads once, under a lock, and is safe to call
+    from concurrent tasks.
     """
 
     def __init__(self, *, project: str, location: str, model_name: str) -> None:
         self._project = project
         self._location = location
         self._model_name = model_name
+        self._lock = asyncio.Lock()
         self._model: Any = None
+        self._config: Any = None
 
-    def _load(self) -> Any:
+    def _load(self) -> tuple[Any, Any]:
         import vertexai
-        from vertexai.generative_models import GenerativeModel
+        from vertexai.generative_models import GenerationConfig, GenerativeModel
 
         vertexai.init(project=self._project, location=self._location)
-        return GenerativeModel(self._model_name)
+        config = GenerationConfig(
+            temperature=JUDGE_TEMPERATURE,
+            max_output_tokens=JUDGE_MAX_OUTPUT_TOKENS,
+            response_mime_type="application/json",
+        )
+        return GenerativeModel(self._model_name), config
+
+    async def prepare(self) -> None:
+        async with self._lock:
+            if self._model is None:
+                self._model, self._config = await asyncio.to_thread(self._load)
 
     async def complete(self, prompt: str) -> str:
-        if self._model is None:
-            self._model = await asyncio.to_thread(self._load)
-        response = await self._model.generate_content_async(prompt)
+        await self.prepare()
+        response = await self._model.generate_content_async(
+            prompt, generation_config=self._config
+        )
         return str(response.text)

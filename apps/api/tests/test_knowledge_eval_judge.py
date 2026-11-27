@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
+import time
+import types
 from typing import Any
 
 import pytest
@@ -15,6 +18,7 @@ from testlyn_api.knowledge.evaluation.judge import (
     judge_passages,
     judged_precision,
     parse_faithfulness_reply,
+    VertexJudgeModel,
     parse_relevance_reply,
 )
 
@@ -275,3 +279,68 @@ def test_agreement_undefined_cases_are_none() -> None:
 def test_agreement_rejects_length_mismatch() -> None:
     with pytest.raises(ValueError):
         judge_agreement([True], [True, False])
+
+
+def _stub_vertex(
+    monkeypatch: pytest.MonkeyPatch, *, init_delay: float = 0.0
+) -> dict[str, Any]:
+    """Fake vertexai modules in sys.modules. No network, no SDK."""
+    calls: dict[str, Any] = {"init": 0, "configs": [], "prompts": []}
+
+    class FakeResponse:
+        text = GOOD_RELEVANCE
+
+    class FakeGenerativeModel:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def generate_content_async(
+            self, prompt: str, generation_config: Any = None
+        ) -> FakeResponse:
+            calls["prompts"].append(prompt)
+            calls["configs"].append(generation_config)
+            return FakeResponse()
+
+    class FakeGenerationConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+    def init(*, project: str, location: str) -> None:
+        calls["init"] += 1
+        if init_delay:
+            time.sleep(init_delay)
+
+    generative = types.ModuleType("vertexai.generative_models")
+    generative.GenerativeModel = FakeGenerativeModel  # type: ignore[attr-defined]
+    generative.GenerationConfig = FakeGenerationConfig  # type: ignore[attr-defined]
+    vertexai = types.ModuleType("vertexai")
+    vertexai.init = init  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "vertexai", vertexai)
+    monkeypatch.setitem(sys.modules, "vertexai.generative_models", generative)
+    return calls
+
+
+async def test_vertex_model_loads_once_with_judge_generation_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _stub_vertex(monkeypatch)
+    model = VertexJudgeModel(project="p", location="l", model_name="m")
+    await asyncio.gather(*(model.complete(f"prompt {i}") for i in range(5)))
+    assert calls["init"] == 1
+    assert len(calls["prompts"]) == 5
+    config = calls["configs"][0].kwargs
+    assert config == {
+        "temperature": 0.0,
+        "max_output_tokens": 1024,
+        "response_mime_type": "application/json",
+    }
+
+
+async def test_prepare_load_is_outside_the_call_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_vertex(monkeypatch, init_delay=0.2)
+    model = VertexJudgeModel(project="p", location="l", model_name="m")
+    await model.prepare()
+    verdict = await judge_context_relevance(model, "q", "p", deadline_s=0.05)
+    assert verdict.relevant is True
