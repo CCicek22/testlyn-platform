@@ -116,6 +116,55 @@ TEST_POSTGRES_URL=postgresql+asyncpg://postgres:localdev@127.0.0.1:55432/testlyn
 
 These tests drop and recreate the `public` schema of the database they point at. Use a throwaway database.
 
+### Evaluating retrieval
+
+`apps/api/evals/knowledge/` holds a synthetic gold set: 12 fictional Markdown documents and 48 queries (16 `paraphrase`, 16 `keyword`, 16 `mixed`). A chunk is relevant to a query when it comes from the named document and its text contains `answer_span`. Each span occurs exactly once in its document and lies inside one chunk; the loader enforces both. Invented names only; `example.com` for hosts.
+
+Run it against an empty, migrated Postgres 18 with pgvector (for example the dev database in `infra/docker-compose.dev.yml` after `alembic upgrade head`). The run creates one org, `knowledge-evaluation`, ingests the corpus, runs every query in `hybrid`, `vector` and `keyword` mode at top_k 5, and deletes what it created, also on failure. It refuses to start when that org already holds documents.
+
+```sh
+cd apps/api
+TEST_POSTGRES_URL=postgresql+asyncpg://testlyn_api:localdev@127.0.0.1:5432/testlyn \
+  uv run --frozen python -m testlyn_api.knowledge.evaluation --json-out eval-report.json
+```
+
+`--embedder openai-compat` points the same run at an OpenAI-style `/embeddings` server. Set `--embedding-base-url` and `--embedding-model`; the API key comes from `KNOWLEDGE_EMBEDDING_API_KEY`. `--embedding-dim` must be 256, the width of the vector column. Query embedding uses `KNOWLEDGE_SEARCH_EMBEDDING_DEADLINE_SECONDS`.
+
+`--judge --judge-model <name>` also grades each retrieved passage with a Gemini model on Vertex AI (project from `GCP_PROJECT_ID`, location from `VERTEX_AI_LOCATION`). This makes paid model calls. It is off by default. See ADR-013 for what it measures.
+
+Metrics, per query, on the top 5 results. Duplicate result ids take no extra rank.
+
+- `hit@5`: 1 if any of the top 5 is relevant.
+- `recall@5`: share of the gold entries covered by the top 5.
+- `MRR`: 1 / rank of the first relevant result within the top 5, else 0.
+- `nDCG@5`: binary-gain discounted cumulative gain over the top 5, divided by the ideal value for the query.
+
+Measured with the hashing embedder on 2026-11-27 (`hashing-256-v1`, 12 documents, 48 queries, top_k 5):
+
+| mode | scope | queries | hit@5 | recall@5 | MRR | nDCG@5 |
+|---|---|---:|---:|---:|---:|---:|
+| hybrid | overall | 48 | 0.542 | 0.542 | 0.382 | 0.421 |
+| hybrid | keyword | 16 | 0.688 | 0.688 | 0.552 | 0.585 |
+| hybrid | mixed | 16 | 0.750 | 0.750 | 0.530 | 0.583 |
+| hybrid | paraphrase | 16 | 0.188 | 0.188 | 0.065 | 0.095 |
+| vector | overall | 48 | 0.479 | 0.479 | 0.249 | 0.305 |
+| vector | keyword | 16 | 0.500 | 0.500 | 0.195 | 0.269 |
+| vector | mixed | 16 | 0.750 | 0.750 | 0.489 | 0.552 |
+| vector | paraphrase | 16 | 0.188 | 0.188 | 0.065 | 0.095 |
+| keyword | overall | 48 | 0.167 | 0.167 | 0.167 | 0.167 |
+| keyword | keyword | 16 | 0.438 | 0.438 | 0.438 | 0.438 |
+| keyword | mixed | 16 | 0.062 | 0.062 | 0.062 | 0.062 |
+| keyword | paraphrase | 16 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+What these numbers show, and what they do not:
+
+- The hashing embedder is a bag-of-words hash. Its paraphrase scores are low by design. **These numbers say nothing about the quality of a real embedding model.**
+- Keyword mode returned no rows for 40 of 48 queries. `websearch_to_tsquery` requires every non-stopword of the query to appear in the chunk, so a natural-language question rarely matches. Hybrid still returns the vector leg's results, so the hybrid row is not hurt the same way.
+- On `kind=keyword`, vector beat keyword mode in this run (0.500 vs 0.438 hit@5). The expectation that keyword wins on exact tokens does not hold for this set and this query style.
+- No judge numbers are included. The judge has not been run against a real model.
+
+The gate (`tests/postgres/test_knowledge_eval.py`, run by the CI `postgres` job) asserts: hybrid hit@5 at least 0.50, hybrid nDCG@5 at least 0.38, hybrid keyword-kind hit@5 at least 0.65, hybrid mixed-kind hit@5 at least 0.70, and hybrid hit@5 no more than 0.05 below the better single leg. Each threshold is 0.04 to 0.06 below its measured value. The gate also checks that two runs give identical metrics.
+
 ## License
 
 © 2026 Mack Cicek. All rights reserved. Source is published for review; no licence is granted.
