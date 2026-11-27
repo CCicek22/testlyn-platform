@@ -204,3 +204,28 @@ def test_cli_prints_table_and_writes_json(
     printed = capsys.readouterr().out
     assert "| hybrid | overall | 48 |" in printed
     assert json.loads(out_path.read_text(encoding="utf-8"))["queries"] == 48
+
+
+class _CountingJudge:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def complete(self, prompt: str) -> str:
+        self.calls += 1
+        return '{"relevant": true, "score": 3, "reason": "counted"}'
+
+
+async def test_each_query_chunk_pair_is_judged_once_per_run(
+    engine: AsyncEngine, migrated: None
+) -> None:
+    judge = _CountingJudge()
+    report = await run_evaluation(
+        engine, dataset=_dataset(), embedder=HashingEmbedder(), judge=judge
+    )
+    pairs = {
+        (q.query_id, item)
+        for mode in report.modes.values()
+        for q in mode.queries
+        for item in q.ranking
+    }
+    assert judge.calls == len(pairs)

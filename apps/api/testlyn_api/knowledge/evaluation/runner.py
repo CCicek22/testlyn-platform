@@ -23,6 +23,7 @@ from testlyn_api.knowledge.evaluation.dataset import EvalSet, Query
 from testlyn_api.knowledge.evaluation.judge import (
     DEFAULT_CONCURRENCY as DEFAULT_JUDGE_CONCURRENCY,
     Agreement,
+    JudgedPassage,
     JudgeModel,
     judge_agreement,
     judge_passages,
@@ -253,6 +254,30 @@ async def _ingest(
     return names
 
 
+async def _judge_cached(
+    judge: JudgeModel,
+    query: Query,
+    hits: list[Any],
+    cache: dict[tuple[str, str], JudgedPassage],
+    concurrency: int,
+) -> list[JudgedPassage]:
+    """Judge each (query, chunk) pair once per run, whatever the mode."""
+    missing = [hit for hit in hits if (query.id, str(hit.chunk_id)) not in cache]
+    if missing:
+        fresh = await judge_passages(
+            judge,
+            query.query,
+            [hit.text for hit in missing],
+            concurrency=concurrency,
+        )
+        for hit, judged in zip(missing, fresh, strict=True):
+            cache[(query.id, str(hit.chunk_id))] = judged
+    return [
+        replace(cache[(query.id, str(hit.chunk_id))], index=i)
+        for i, hit in enumerate(hits)
+    ]
+
+
 async def _search_mode(
     engine: AsyncEngine,
     dataset: EvalSet,
@@ -262,6 +287,7 @@ async def _search_mode(
     top_k: int,
     judge: JudgeModel | None,
     judge_concurrency: int,
+    cache: dict[tuple[str, str], JudgedPassage],
 ) -> ModeReport:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     results: list[QueryResult] = []
@@ -288,11 +314,8 @@ async def _search_mode(
         result = score_query(query, ranked, top_k)
         if judge is not None:
             # Outside the session: the judge is a network call.
-            judged = await judge_passages(
-                judge,
-                query.query,
-                [hit.text for hit in outcome.results],
-                concurrency=judge_concurrency,
+            judged = await _judge_cached(
+                judge, query, outcome.results, cache, judge_concurrency
             )
             verdicts = [
                 None if j.verdict is None else j.verdict.relevant for j in judged
@@ -345,11 +368,20 @@ async def run_evaluation(
             "run against an empty database or remove them first"
         )
     created_org = await _ensure_org(engine)
+    cache: dict[tuple[str, str], JudgedPassage] = {}
     try:
         names = await _ingest(engine, dataset, embedder)
         mode_reports = {
             mode: await _search_mode(
-                engine, dataset, names, embedder, mode, top_k, judge, judge_concurrency
+                engine,
+                dataset,
+                names,
+                embedder,
+                mode,
+                top_k,
+                judge,
+                judge_concurrency,
+                cache,
             )
             for mode in modes
         }
