@@ -13,6 +13,11 @@ testlyn_api/models/knowledge.py.
 
 The vector extension is created IF NOT EXISTS and is left in place on
 downgrade, since other objects may depend on it.
+
+CREATE EXTENSION vector needs a superuser: pgvector is not a trusted
+extension. A non-superuser migration role works only if an administrator has
+already created the extension in the target database; IF NOT EXISTS then makes
+this step a no-op.
 """
 
 from __future__ import annotations
@@ -61,8 +66,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
+        # NULLS NOT DISTINCT (Postgres 15+): org-wide rows (project NULL) are unique too.
         sa.UniqueConstraint(
-            "org_id", "content_sha256", name="uq_knowledge_documents_org_sha"
+            "org_id",
+            "project_id",
+            "content_sha256",
+            name="uq_knowledge_documents_org_project_sha",
+            postgresql_nulls_not_distinct=True,
         ),
     )
     op.create_index("ix_knowledge_documents_org_id", "knowledge_documents", ["org_id"])

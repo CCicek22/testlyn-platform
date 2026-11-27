@@ -4,7 +4,13 @@ import uuid
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from collections.abc import Awaitable, Callable
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +18,7 @@ from testlyn_api.config import get_settings
 from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
 from testlyn_api.knowledge import service
-from testlyn_api.knowledge.embeddings import Embedder, get_embedder
+from testlyn_api.knowledge.embeddings import Embedder, EmbeddingError, get_embedder
 from testlyn_api.models.knowledge import KnowledgeDocument
 from testlyn_api.models.project import Project
 from testlyn_api.schemas.knowledge import (
@@ -24,9 +30,54 @@ from testlyn_api.schemas.knowledge import (
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/v1/orgs/{org_id}/knowledge", tags=["knowledge"])
+
+class _SafeValidationRoute(APIRoute):
+    """Keep validation errors encodable.
+
+    Pydantic echoes the rejected value into ``input``. A lone surrogate there
+    cannot be encoded as UTF-8, so the default 422 response would crash. Drop
+    ``input`` and ``ctx`` for this router only.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        original = super().get_route_handler()
+
+        async def handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except RequestValidationError as exc:
+                errors = [
+                    {k: v for k, v in err.items() if k not in ("input", "ctx")}
+                    for err in exc.errors()
+                ]
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    content={"detail": jsonable_encoder(errors)},
+                )
+
+        return handler
+
+
+router = APIRouter(
+    prefix="/v1/orgs/{org_id}/knowledge",
+    tags=["knowledge"],
+    route_class=_SafeValidationRoute,
+)
 
 EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
+
+# Permission model: every route first requires org membership (any role), so
+# non-members get 403 and nothing about the org leaks. The action check then
+# uses the project-aware matrix, so a project role override is honoured. A
+# document with no project follows the org role.
+
+
+async def _require_member(
+    org_id: uuid.UUID, user_id: uuid.UUID, session: AsyncSession
+) -> None:
+    await _enforce_perm(
+        "read", "project", user_id=user_id, org_id=org_id, session=session
+    )
 
 
 @router.post(
@@ -42,12 +93,21 @@ async def create_document(
     session: SessionDep,
     embedder: EmbedderDep,
 ) -> KnowledgeDocumentOut:
-    await _enforce_perm(
-        "write", "project", user_id=current_user.id, org_id=org_id, session=session
-    )
+    await _require_member(org_id, current_user.id, session)
     if body.project_id is not None:
+        # Verify the project belongs to this org before its id is used for
+        # permissions: the override lookup does not check the org.
         await _get_project_or_404(org_id, body.project_id, session)
+    await _enforce_perm(
+        "write",
+        "project",
+        user_id=current_user.id,
+        org_id=org_id,
+        project_id=body.project_id,
+        session=session,
+    )
 
+    settings = get_settings()
     try:
         document, created = await service.ingest_document(
             session,
@@ -58,11 +118,20 @@ async def create_document(
             text=body.text,
             created_by=current_user.id,
             embedder=embedder,
-            max_chars=get_settings().knowledge_max_document_chars,
+            max_chars=settings.knowledge_max_document_chars,
+            max_chunks=settings.knowledge_max_chunks,
+            embed_deadline_s=settings.knowledge_embedding_deadline_seconds,
         )
     except service.KnowledgeInputError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except EmbeddingError as exc:
+        # Generic message only: no endpoint, status body, or key reaches the client.
+        log.warning("knowledge.embedding_unavailable", reason=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Embedding service unavailable, try again later",
         ) from exc
 
     if not created:
@@ -82,9 +151,17 @@ async def list_documents(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> list[KnowledgeDocumentOut]:
-    await _enforce_perm(
-        "read", "project", user_id=current_user.id, org_id=org_id, session=session
-    )
+    await _require_member(org_id, current_user.id, session)
+    if project_id is not None:
+        await _get_project_or_404(org_id, project_id, session)
+        await _enforce_perm(
+            "read",
+            "project",
+            user_id=current_user.id,
+            org_id=org_id,
+            project_id=project_id,
+            session=session,
+        )
     documents = await service.list_documents(
         session, org_id=org_id, project_id=project_id, limit=limit, offset=offset
     )
@@ -97,12 +174,26 @@ async def get_document(
     document_id: uuid.UUID,
     current_user: CurrentUserDep,
     session: SessionDep,
+    chunk_limit: int = Query(100, ge=1, le=500),
+    chunk_offset: int = Query(0, ge=0),
 ) -> KnowledgeDocumentDetail:
-    await _enforce_perm(
-        "read", "project", user_id=current_user.id, org_id=org_id, session=session
-    )
+    await _require_member(org_id, current_user.id, session)
     document = await _get_document_or_404(org_id, document_id, session)
-    chunks = await service.list_chunks(session, org_id=org_id, document_id=document.id)
+    await _enforce_perm(
+        "read",
+        "project",
+        user_id=current_user.id,
+        org_id=org_id,
+        project_id=document.project_id,
+        session=session,
+    )
+    chunks = await service.list_chunks(
+        session,
+        org_id=org_id,
+        document_id=document.id,
+        limit=chunk_limit,
+        offset=chunk_offset,
+    )
     return KnowledgeDocumentDetail(
         **KnowledgeDocumentOut.model_validate(document).model_dump(),
         chunks=[KnowledgeChunkOut.model_validate(c) for c in chunks],
@@ -116,16 +207,17 @@ async def delete_document(
     current_user: CurrentUserDep,
     session: SessionDep,
 ) -> None:
+    await _require_member(org_id, current_user.id, session)
+    document = await _get_document_or_404(org_id, document_id, session)
     await _enforce_perm(
-        "delete", "project", user_id=current_user.id, org_id=org_id, session=session
+        "delete",
+        "project",
+        user_id=current_user.id,
+        org_id=org_id,
+        project_id=document.project_id,
+        session=session,
     )
-    deleted = await service.delete_document(
-        session, org_id=org_id, document_id=document_id
-    )
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
-        )
+    await service.delete_document(session, document)
 
 
 async def _get_document_or_404(

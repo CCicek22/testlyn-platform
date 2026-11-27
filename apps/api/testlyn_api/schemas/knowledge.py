@@ -3,7 +3,18 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _require_storable_text(value: str) -> str:
+    """Postgres rejects NUL bytes; lone surrogates cannot be encoded as UTF-8."""
+    if "\x00" in value:
+        raise ValueError("must not contain NUL characters")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("must be valid Unicode (no lone surrogates)") from exc
+    return value
 
 
 class KnowledgeDocumentCreate(BaseModel):
@@ -11,6 +22,11 @@ class KnowledgeDocumentCreate(BaseModel):
     source: str = Field(min_length=1, max_length=40)
     text: str
     project_id: uuid.UUID | None = None
+
+    @field_validator("title", "source", "text")
+    @classmethod
+    def _check_text(cls, value: str) -> str:
+        return _require_storable_text(value)
 
 
 class KnowledgeChunkOut(BaseModel):
