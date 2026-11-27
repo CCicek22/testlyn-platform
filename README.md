@@ -38,7 +38,7 @@ See [SETUP.md](./SETUP.md).
 
 ## Hard rules
 
-See [CLAUDE.md §2](./CLAUDE.md). Most important:
+Most important:
 
 - k6 binary is **unmodified**, invoked as subprocess. Never xk6 / custom build.
 - `tests` and `test_runs` carry a `product` discriminator column.
@@ -54,4 +54,4 @@ See [CLAUDE.md §2](./CLAUDE.md). Most important:
 
 ## License
 
-Proprietary. © Example Co / Testlyn.
+© 2026 Mack Cicek. All rights reserved. Source is published for review; no licence is granted.
