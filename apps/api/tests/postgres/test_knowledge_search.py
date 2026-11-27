@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Sequence
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -210,6 +210,26 @@ async def test_forced_plan_uses_the_hnsw_index(
     assert "ix_knowledge_chunks_embedding_hnsw" in plan, plan
 
 
+async def test_forced_keyword_match_uses_the_gin_index_with_bound_language(
+    forced_hnsw_session: AsyncSession,
+) -> None:
+    """The @@ predicate, with asyncpg-bound language and query, is served by GIN.
+
+    The full keyword statement adds an org_id filter; on a near-empty table the
+    planner prefers the org_id btree there (measured), so the GIN proof uses the
+    predicate alone with seqscan and sort disabled.
+    """
+    stmt = select(KnowledgeChunk.id).where(search.keyword_match("refund policy"))
+    conn = await forced_hnsw_session.connection()
+    compiled = stmt.compile(dialect=conn.dialect)
+    params = [compiled.params[name] for name in compiled.positiontup or []]
+    rows = await conn.exec_driver_sql("EXPLAIN " + str(compiled), tuple(params))
+    plan = "\n".join(row[0] for row in rows)
+
+    assert "ix_knowledge_chunks_text_tsv" in plan, plan
+    assert "'english'" not in str(compiled), str(compiled)
+
+
 async def test_filtered_hnsw_returns_own_org_chunks_behind_closer_foreign_ones(
     forced_hnsw_session: AsyncSession,
 ) -> None:
@@ -243,6 +263,64 @@ async def test_filtered_hnsw_returns_own_org_chunks_behind_closer_foreign_ones(
 
     assert len(outcome.results) == 3
     assert {r.document_title for r in outcome.results} == {"A doc"}
+
+
+async def test_project_scoped_hnsw_skips_sibling_project_and_foreign_org_chunks(
+    forced_hnsw_session: AsyncSession,
+) -> None:
+    query = _e(0)
+    org_b = await _org(forced_hnsw_session)
+    org_a = await _org(forced_hnsw_session)
+    project_p = await _project(forced_hnsw_session, org_a, "P")
+    project_q = await _project(forced_hnsw_session, org_a, "Q")
+    close = []
+    for i in range(300):
+        vec = _e(0)
+        vec[1 + i % 200] += 0.01
+        close.append(vec)
+    # Closer chunks in a sibling project of the same org and in another org.
+    await _doc_with_vectors(
+        forced_hnsw_session, org_a, title="Q doc", vectors=close, project_id=project_q
+    )
+    await _doc_with_vectors(forced_hnsw_session, org_b, title="B doc", vectors=close)
+    own = [_e(axis, 0.5) for axis in (1, 2, 3)]
+    await _doc_with_vectors(
+        forced_hnsw_session, org_a, title="P doc", vectors=own, project_id=project_p
+    )
+
+    outcome = await _search(
+        forced_hnsw_session,
+        org_id=org_a,
+        project_id=project_p,
+        query="unrelated words",
+        mode="vector",
+        top_k=3,
+        embedder=_FixedEmbedder(query),
+    )
+
+    assert len(outcome.results) == 3
+    assert {r.document_title for r in outcome.results} == {"P doc"}
+
+
+async def test_project_scoped_statement_plan_uses_the_hnsw_index(
+    forced_hnsw_session: AsyncSession,
+) -> None:
+    stmt = search.build_vector_statement(
+        org_id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+        model_name=MODEL,
+        query_vector=_e(0),
+        limit=20,
+    )
+    compiled = str(
+        stmt.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    rows = await forced_hnsw_session.execute(text("EXPLAIN " + compiled))
+    plan = "\n".join(row[0] for row in rows)
+
+    assert "ix_knowledge_chunks_embedding_hnsw" in plan, plan
 
 
 # ── Legs and modes ────────────────────────────────────────────────────────────
@@ -408,3 +486,78 @@ async def test_search_never_returns_another_orgs_chunks(
 
     assert outcome.results, "expected org X to find its own document"
     assert {r.document_title for r in outcome.results} == {"X doc"}
+
+
+class _RecordingReranker:
+    """Records whether the search session holds a transaction during the call."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self.in_transaction_during_call: list[bool] = []
+
+    async def rerank(
+        self, query: str, documents: list[str], *, top_n: int
+    ) -> list[tuple[int, float]]:
+        self.in_transaction_during_call.append(self._session.in_transaction())
+        return [(index, float(-index)) for index in range(min(top_n, len(documents)))]
+
+
+async def test_real_legs_leave_no_transaction_open_for_the_reranker(
+    session: AsyncSession,
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "refund policy for annual plans", title="Refunds")
+    await _ingest(session, org_id, "shipping times by region", title="Shipping")
+    reranker = _RecordingReranker(session)
+
+    outcome = await search.run_search(
+        session,
+        org_id=org_id,
+        project_id=None,
+        query="refund policy",
+        mode="hybrid",
+        top_k=2,
+        embedder=HashingEmbedder(),
+        reranker=reranker,  # type: ignore[arg-type]
+        embed_deadline_s=None,
+        rerank_deadline_s=None,
+    )
+
+    assert outcome.reranked is True
+    assert reranker.in_transaction_during_call == [False]
+
+
+async def test_search_settings_do_not_leak_to_the_pooled_connection(
+    postgres_url: str, migrated: None
+) -> None:
+    """One pooled connection only: any SET that survives the search would show."""
+    engine = create_async_engine(postgres_url, pool_size=1, max_overflow=0)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+            org_id = await _org(s)
+            await _ingest(s, org_id, "alpha beta gamma", title="Leak")
+            await search.run_search(
+                s,
+                org_id=org_id,
+                project_id=None,
+                query="alpha",
+                mode="hybrid",
+                top_k=3,
+                embedder=HashingEmbedder(),
+                reranker=None,
+                embed_deadline_s=None,
+                rerank_deadline_s=None,
+            )
+            row = (
+                await s.execute(
+                    text(
+                        "SELECT current_setting('hnsw.iterative_scan'), "
+                        "current_setting('hnsw.ef_search')"
+                    )
+                )
+            ).one()
+            await s.commit()
+
+        assert tuple(row) == ("off", "40")
+    finally:
+        await engine.dispose()
