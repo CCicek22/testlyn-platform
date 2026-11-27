@@ -5,6 +5,7 @@ Run with: TEST_POSTGRES_URL=postgresql+asyncpg://... uv run pytest -m postgres
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
@@ -139,3 +140,67 @@ async def test_existing_empty_eval_org_is_kept(
     async with factory() as s:
         assert await s.get(Organization, EVAL_ORG_ID) is not None
     assert await _doc_count(engine) == 0
+
+
+class _AlwaysRelevantJudge:
+    async def complete(self, prompt: str) -> str:
+        return '{"relevant": true, "score": 5, "reason": "fixed reply"}'
+
+
+class _ProseJudge:
+    async def complete(self, prompt: str) -> str:
+        return "Sure! This passage is relevant."
+
+
+async def test_judge_wiring_counts_every_retrieved_passage(
+    engine: AsyncEngine, migrated: None
+) -> None:
+    report = await run_evaluation(
+        engine,
+        dataset=_dataset(),
+        embedder=HashingEmbedder(),
+        modes=("hybrid",),
+        judge=_AlwaysRelevantJudge(),
+    )
+    mode = report.modes["hybrid"]
+    assert mode.judge is not None
+    retrieved = sum(len(q.ranking) for q in mode.queries)
+    assert mode.judge.agreement.n == retrieved
+    assert mode.judge.judge_errors == 0
+    assert all(q.judged_precision in (0.0, 1.0) for q in mode.queries)
+    assert "judge" in report.as_dict()["modes"]["hybrid"]
+
+
+async def test_unparseable_judge_replies_are_recorded_not_passed(
+    engine: AsyncEngine, migrated: None
+) -> None:
+    report = await run_evaluation(
+        engine,
+        dataset=_dataset(),
+        embedder=HashingEmbedder(),
+        modes=("hybrid",),
+        judge=_ProseJudge(),
+    )
+    mode = report.modes["hybrid"]
+    assert mode.judge is not None
+    retrieved = sum(len(q.ranking) for q in mode.queries)
+    assert mode.judge.judge_errors == retrieved
+    assert mode.judge.judged_precision == 0.0
+    assert mode.judge.agreement.n == 0
+    assert mode.judge.agreement.kappa is None
+
+
+def test_cli_prints_table_and_writes_json(
+    migrated: None,
+    postgres_url: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from testlyn_api.knowledge.evaluation.__main__ import main
+
+    out_path = tmp_path / "report.json"
+    code = main(["--database-url", postgres_url, "--json-out", str(out_path)])
+    assert code == 0
+    printed = capsys.readouterr().out
+    assert "| hybrid | overall | 48 |" in printed
+    assert json.loads(out_path.read_text(encoding="utf-8"))["queries"] == 48

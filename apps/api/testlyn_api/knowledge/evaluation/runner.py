@@ -10,7 +10,7 @@ the service and search layers commit before each network call.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -20,6 +20,14 @@ from testlyn_api.knowledge import search, service
 from testlyn_api.knowledge.embeddings import Embedder
 from testlyn_api.knowledge.evaluation import metrics
 from testlyn_api.knowledge.evaluation.dataset import EvalSet, Query
+from testlyn_api.knowledge.evaluation.judge import (
+    DEFAULT_CONCURRENCY as DEFAULT_JUDGE_CONCURRENCY,
+    Agreement,
+    JudgeModel,
+    judge_agreement,
+    judge_passages,
+    judged_precision,
+)
 from testlyn_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from testlyn_api.models.org import Organization
 
@@ -46,6 +54,15 @@ class QueryResult:
     kind: str
     ranking: tuple[str, ...]  # "<doc_id>@<char_start>", best first
     metrics: dict[str, float]
+    judged_precision: float | None = None
+    judge_errors: int = 0
+
+
+@dataclass(frozen=True)
+class JudgeSummary:
+    judged_precision: float  # mean over queries of the judged share of top_k passages
+    judge_errors: int
+    agreement: Agreement  # judge vs span gold, retrieved passages only
 
 
 @dataclass(frozen=True)
@@ -54,6 +71,7 @@ class ModeReport:
     overall: dict[str, float]
     by_kind: dict[str, dict[str, float]]
     queries: tuple[QueryResult, ...]
+    judge: JudgeSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -77,12 +95,15 @@ class EvalReport:
                 name: {
                     "overall": mode.overall,
                     "by_kind": mode.by_kind,
+                    "judge": _judge_dict(mode.judge),
                     "queries": [
                         {
                             "id": q.query_id,
                             "kind": q.kind,
                             "ranking": list(q.ranking),
                             "metrics": q.metrics,
+                            "judged_precision": q.judged_precision,
+                            "judge_errors": q.judge_errors,
                         }
                         for q in mode.queries
                     ],
@@ -90,6 +111,16 @@ class EvalReport:
                 for name, mode in self.modes.items()
             },
         }
+
+
+def _judge_dict(summary: JudgeSummary | None) -> dict[str, Any] | None:
+    if summary is None:
+        return None
+    return {
+        "judged_precision": summary.judged_precision,
+        "judge_errors": summary.judge_errors,
+        "agreement": asdict(summary.agreement),
+    }
 
 
 def gold_ids(query: Query) -> frozenset[str]:
@@ -229,9 +260,13 @@ async def _search_mode(
     embedder: Embedder,
     mode: str,
     top_k: int,
+    judge: JudgeModel | None,
+    judge_concurrency: int,
 ) -> ModeReport:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     results: list[QueryResult] = []
+    gold: list[bool] = []
+    judge_verdicts: list[bool | None] = []
     for query in dataset.queries:
         async with factory() as session:
             outcome = await search.run_search(
@@ -250,16 +285,47 @@ async def _search_mode(
             (str(hit.chunk_id), names[hit.document_id], hit.text, hit.char_start)
             for hit in outcome.results
         ]
-        results.append(score_query(query, ranked, top_k))
+        result = score_query(query, ranked, top_k)
+        if judge is not None:
+            # Outside the session: the judge is a network call.
+            judged = await judge_passages(
+                judge,
+                query.query,
+                [hit.text for hit in outcome.results],
+                concurrency=judge_concurrency,
+            )
+            verdicts = [
+                None if j.verdict is None else j.verdict.relevant for j in judged
+            ]
+            gold.extend(
+                bool(gold_matches(query, names[hit.document_id], hit.text))
+                for hit in outcome.results
+            )
+            judge_verdicts.extend(verdicts)
+            result = replace(
+                result,
+                judged_precision=judged_precision(judged),
+                judge_errors=sum(1 for j in judged if j.verdict is None),
+            )
+        results.append(result)
     by_kind = {
         kind: aggregate([r for r in results if r.kind == kind])
         for kind in sorted({q.kind for q in dataset.queries})
     }
+    summary = None
+    if judge is not None:
+        summary = JudgeSummary(
+            judged_precision=sum(r.judged_precision or 0.0 for r in results)
+            / len(results),
+            judge_errors=sum(r.judge_errors for r in results),
+            agreement=judge_agreement(gold, judge_verdicts),
+        )
     return ModeReport(
         mode=mode,
         overall=aggregate(results),
         by_kind=by_kind,
         queries=tuple(results),
+        judge=summary,
     )
 
 
@@ -270,6 +336,8 @@ async def run_evaluation(
     embedder: Embedder,
     top_k: int = TOP_K,
     modes: tuple[str, ...] = MODES,
+    judge: JudgeModel | None = None,
+    judge_concurrency: int = DEFAULT_JUDGE_CONCURRENCY,
 ) -> EvalReport:
     if await _count_eval_documents(engine):
         raise EvaluationRefused(
@@ -280,7 +348,9 @@ async def run_evaluation(
     try:
         names = await _ingest(engine, dataset, embedder)
         mode_reports = {
-            mode: await _search_mode(engine, dataset, names, embedder, mode, top_k)
+            mode: await _search_mode(
+                engine, dataset, names, embedder, mode, top_k, judge, judge_concurrency
+            )
             for mode in modes
         }
     finally:
