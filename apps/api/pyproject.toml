@@ -30,6 +30,7 @@ dependencies = [
     "google-genai>=1.0.0",
     "sse-starlette>=2.1.0",
     "cachetools>=5.5.0",
+    "pgvector>=0.4.2",
 ]
 
 [project.optional-dependencies]
@@ -55,6 +56,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = [
+    "postgres: needs TEST_POSTGRES_URL (a throwaway pgvector-enabled database); skipped when unset",
+]
 
 [tool.ruff.lint]
 # B008: FastAPI canonical pattern is `param: T = Query(...)` — false positive here.

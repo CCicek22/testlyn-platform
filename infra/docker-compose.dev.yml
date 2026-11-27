@@ -5,9 +5,12 @@ version: "3.9"
 # Stop:  docker compose -f infra/docker-compose.dev.yml down -v
 
 services:
-  # ── Postgres 16 ─────────────────────────────────────────────────────────────
+  # ── Postgres 18 + pgvector ──────────────────────────────────────────────────
+  # The PG 18 image keeps its data under /var/lib/postgresql/18/docker, so the
+  # volume mounts at /var/lib/postgresql, not /var/lib/postgresql/data. Volumes
+  # made with the old mount, or from Postgres 16, must be removed first (down -v).
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.7-pg18
     environment:
       POSTGRES_DB: testlyn
       POSTGRES_USER: testlyn_api
@@ -15,7 +18,7 @@ services:
     ports:
       - "0.0.0.0:5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U testlyn_api -d testlyn"]
       interval: 5s
