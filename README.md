@@ -8,7 +8,7 @@ Developer-first AI test platform. Phase 1 ships load testing.
 |---|---|
 | Backend | Python 3.13, FastAPI, SQLAlchemy 2 async, Pydantic v2, Alembic, uv |
 | Frontend | Node 24 LTS, Next.js 15, React 19, TypeScript, Tailwind v4, shadcn/ui |
-| Database | Postgres 16 (Cloud SQL), BigQuery (`testlyn_metrics`) |
+| Database | Postgres 18 + pgvector (dev and CI); Terraform `cloud_sql` module still pins Postgres 16, not moved yet; BigQuery (`testlyn_metrics`) |
 | Queue | Cloud Tasks, Cloud Scheduler |
 | Load engine | Stock `grafana/k6` + Python BigQuery sidecar (AGPL-safe) |
 | Auth | Identity Platform |
@@ -58,9 +58,11 @@ Text is stored as documents, split into chunks, and each chunk gets a 256-dimens
 
 Endpoints, prefix `/v1/orgs/{org_id}/knowledge`:
 
-- `POST /documents` takes `title`, `source`, `text`, and optional `project_id`. Returns 201 for a new document, or 200 with the existing one when identical text is already stored in the org.
+- `POST /documents` takes `title`, `source`, `text`, and optional `project_id`. Returns 201 for a new document, or 200 with the existing one when identical text is already stored in the same project (or, with no project, in the org). The same text in two different projects creates two documents.
+  - 422 for empty text, text over `KNOWLEDGE_MAX_DOCUMENT_CHARS`, text that makes more than `KNOWLEDGE_MAX_CHUNKS` chunks (default 2000), NUL bytes, or lone surrogates.
+  - 503 with a generic message when the embedder fails or does not answer within `KNOWLEDGE_EMBEDDING_DEADLINE_SECONDS` (default 120). Nothing is stored in that case.
 - `GET /documents` lists newest first. Supports `limit`, `offset`, and `project_id`.
-- `GET /documents/{document_id}` returns the document and its chunks. Embeddings are not returned.
+- `GET /documents/{document_id}` returns the document, `chunk_count`, and one page of chunks. Pages use `chunk_limit` (default 100, max 500) and `chunk_offset`. Embeddings are not returned.
 - `DELETE /documents/{document_id}` returns 204 and removes its chunks.
 
 Choosing an embedder with `KNOWLEDGE_EMBEDDING_PROVIDER`:
@@ -68,7 +70,9 @@ Choosing an embedder with `KNOWLEDGE_EMBEDDING_PROVIDER`:
 - `hashing` (default): offline and deterministic, for tests and CI. It matches shared words only and does not understand meaning.
 - `openai_compat`: POSTs to `{KNOWLEDGE_EMBEDDING_BASE_URL}/embeddings` in the OpenAI format. Every returned vector must have 256 dimensions, or the request fails. Requires `KNOWLEDGE_EMBEDDING_BASE_URL`.
 
-The dev compose Postgres is PostgreSQL 18 with pgvector. An existing Postgres 16 volume must be recreated (`docker compose -f infra/docker-compose.dev.yml down -v`).
+The dev compose Postgres is PostgreSQL 18 with pgvector. Its volume mounts at `/var/lib/postgresql` (PG 18 keeps data under `18/docker`). A volume made with an older mount, or from Postgres 16, must be removed first (`docker compose -f infra/docker-compose.dev.yml down -v`).
+
+`CREATE EXTENSION vector` needs superuser. Migration 0015 runs it, so the migration role must either be a superuser or find the extension already installed. An admin can pre-create it with `CREATE EXTENSION vector;` in the target database. The `IF NOT EXISTS` clause then makes the migration a no-op.
 
 Postgres-only tests (skipped without `TEST_POSTGRES_URL`):
 
