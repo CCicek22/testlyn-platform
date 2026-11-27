@@ -80,6 +80,9 @@ def test_valid_faithfulness_reply_parses() -> None:
         "x" * 5000,
         "[" * 200_000,
         '{"relevant": ' + "9" * 5000 + "}",
+        '{"relevant": ' + "9" * 3000 + "}",
+        '{"relevant": ' + "[" * 1500 + "]" * 1500 + ', "score": 4, "reason": "x"}',
+        '{"relevant": false, "score": 1, "reason": "x", "relevant": true}',
     ],
 )
 def test_hostile_relevance_replies_are_rejected(raw: str) -> None:
@@ -100,6 +103,12 @@ def test_hostile_relevance_replies_are_rejected(raw: str) -> None:
         '{"faithful": true, "unsupported_claims": [], "score": 9}',
         '{"faithful": true, "unsupported_claims": []}',
         "Not JSON at all",
+        '{"faithful": false, "unsupported_claims": [], "score": 1, "faithful": true}',
+        '{"faithful": ' + "9" * 3000 + ', "unsupported_claims": [], "score": 3}',
+        '{"faithful": true, "unsupported_claims": '
+        + "[" * 1500
+        + "]" * 1500
+        + ', "score": 3}',
     ],
 )
 def test_hostile_faithfulness_replies_are_rejected(raw: str) -> None:
@@ -163,6 +172,18 @@ async def test_unexpected_parser_failure_becomes_judge_error(
     judge = FakeJudgeModel([GOOD_RELEVANCE])
     with pytest.raises(JudgeError, match="KeyError"):
         await judge_context_relevance(judge, "q", "p")
+
+
+async def test_unexpected_faithfulness_parser_failure_becomes_judge_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(raw: object) -> None:
+        raise TypeError("bad shape")
+
+    monkeypatch.setattr(judge_module, "parse_faithfulness_reply", broken)
+    judge = FakeJudgeModel([GOOD_FAITHFULNESS])
+    with pytest.raises(JudgeError, match="TypeError"):
+        await judge_faithfulness(judge, "q", "a", ["p"])
 
 
 async def test_faithfulness_prompt_lists_every_passage_inside_data_block() -> None:

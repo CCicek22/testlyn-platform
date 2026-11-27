@@ -126,13 +126,25 @@ def _reject_constant(name: str) -> Any:
     raise ValueError(f"non-finite constant {name} is not allowed")
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # json.loads keeps the last duplicate silently; a repeated key is ambiguous.
+    keys = [key for key, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate key in judge reply")
+    return dict(pairs)
+
+
 def _parse_object(raw: object, keys: frozenset[str]) -> dict[str, Any]:
     if type(raw) is not str:
         raise JudgeError("judge reply is not text")
     if len(raw) > MAX_REPLY_CHARS:
         raise JudgeError("judge reply is too long")
     try:
-        obj = json.loads(raw, parse_constant=_reject_constant)
+        obj = json.loads(
+            raw,
+            parse_constant=_reject_constant,
+            object_pairs_hook=_no_duplicate_keys,
+        )
     except (ValueError, RecursionError, OverflowError):
         raise JudgeError("judge reply is not valid JSON") from None
     if type(obj) is not dict:
