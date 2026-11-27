@@ -201,5 +201,7 @@ async def test_deeply_nested_json_is_rerank_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=payload)
 
-    with pytest.raises(RerankError, match="malformed"):
+    # Whether the JSON parser hits its recursion limit depends on the interpreter
+    # build. Either way the reply is rejected: as malformed, or as a wrong count.
+    with pytest.raises(RerankError):
         await _reranker(handler).rerank("q", DOCS, top_n=2)
