@@ -157,6 +157,11 @@ class Settings(BaseSettings):
     knowledge_max_document_chars: int = 500_000
     knowledge_max_chunks: int = 2000
     knowledge_embedding_deadline_seconds: float = 120.0
+    knowledge_search_embedding_deadline_seconds: float = 10.0
+    knowledge_reranker_url: str = ""
+    knowledge_reranker_model: str = "reranker"
+    knowledge_reranker_api_key: str = ""
+    knowledge_reranker_deadline_seconds: float = 10.0
 
     # --- Stripe ---
     stripe_secret_key: str = "sk_test_PLACEHOLDER"

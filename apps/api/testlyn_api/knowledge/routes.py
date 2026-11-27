@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.config import get_settings
 from testlyn_api.core.permissions import _enforce_perm
 from testlyn_api.deps import CurrentUserDep, SessionDep
-from testlyn_api.knowledge import service
+from testlyn_api.knowledge import search, service
 from testlyn_api.knowledge.embeddings import Embedder, EmbeddingError, get_embedder
+from testlyn_api.knowledge.rerank import Reranker, get_reranker
 from testlyn_api.models.knowledge import KnowledgeDocument
 from testlyn_api.models.project import Project
 from testlyn_api.schemas.knowledge import (
@@ -26,6 +27,9 @@ from testlyn_api.schemas.knowledge import (
     KnowledgeDocumentCreate,
     KnowledgeDocumentDetail,
     KnowledgeDocumentOut,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
+    KnowledgeSearchResult,
 )
 
 log = structlog.get_logger(__name__)
@@ -65,6 +69,7 @@ router = APIRouter(
 )
 
 EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
+RerankerDep = Annotated[Reranker | None, Depends(get_reranker)]
 
 # Permission model: every route first requires org membership (any role), so
 # non-members get 403 and nothing about the org leaks. The action check then
@@ -218,6 +223,59 @@ async def delete_document(
         session=session,
     )
     await service.delete_document(session, document)
+
+
+@router.post("/search", response_model=KnowledgeSearchResponse)
+async def search_knowledge(
+    org_id: uuid.UUID,
+    body: KnowledgeSearchRequest,
+    current_user: CurrentUserDep,
+    session: SessionDep,
+    embedder: EmbedderDep,
+    reranker: RerankerDep,
+) -> KnowledgeSearchResponse:
+    # Org-wide search covers every document of the org: no role or override can
+    # remove a member's project read access (viewer is the lowest role and
+    # overrides are limited to the same four roles), so nothing is excluded.
+    await _require_member(org_id, current_user.id, session)
+    if body.project_id is not None:
+        await _get_project_or_404(org_id, body.project_id, session)
+        await _enforce_perm(
+            "read",
+            "project",
+            user_id=current_user.id,
+            org_id=org_id,
+            project_id=body.project_id,
+            session=session,
+        )
+
+    settings = get_settings()
+    try:
+        outcome = await search.run_search(
+            session,
+            org_id=org_id,
+            project_id=body.project_id,
+            query=body.query,
+            mode=body.mode,
+            top_k=body.top_k,
+            embedder=embedder,
+            reranker=reranker,
+            embed_deadline_s=settings.knowledge_search_embedding_deadline_seconds,
+            rerank_deadline_s=settings.knowledge_reranker_deadline_seconds,
+        )
+    except EmbeddingError as exc:
+        # Generic message only: no endpoint, status body, or key reaches the client.
+        log.warning("knowledge.embedding_unavailable", reason=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Embedding service unavailable, try again later",
+        ) from exc
+
+    return KnowledgeSearchResponse(
+        results=[KnowledgeSearchResult.model_validate(r) for r in outcome.results],
+        mode=body.mode,
+        reranked=outcome.reranked,
+    )
 
 
 async def _get_document_or_404(
