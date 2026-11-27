@@ -67,16 +67,20 @@ class HttpReranker:
         if response.status_code >= 400:
             raise RerankError(f"rerank endpoint returned HTTP {response.status_code}")
 
+        expected = min(top_n, len(documents))
         try:
             data = response.json()["results"]
-            if not isinstance(data, list):
-                raise TypeError("results is not a list")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RerankError("rerank response is malformed") from exc
+        if not isinstance(data, list):
+            raise RerankError("rerank response is malformed")
+        if len(data) != expected:
+            raise RerankError("rerank response has the wrong number of results")
+        try:
             pairs = [(item["index"], float(item["relevance_score"])) for item in data]
         except (KeyError, TypeError, ValueError) as exc:
             raise RerankError("rerank response is malformed") from exc
 
-        if len(pairs) != min(top_n, len(documents)):
-            raise RerankError("rerank response has the wrong number of results")
         indices = [index for index, _ in pairs]
         for index in indices:
             if isinstance(index, bool) or not isinstance(index, int):
