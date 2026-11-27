@@ -66,7 +66,7 @@ def hit_at_k(
     _require_gold(gold)
     _require_k(k)
     top = _unique_matches(ranking, matches)[:k]
-    return 1.0 if any(top) else 0.0
+    return 1.0 if any(m & gold for m in top) else 0.0
 
 
 def recall_at_k(

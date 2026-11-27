@@ -95,3 +95,13 @@ def test_second_chunk_for_same_gold_gains_nothing() -> None:
     gold = frozenset({"g1"})
     assert ndcg_at_k(ranking, matches, gold, 2) == pytest.approx(1.0)
     assert recall_at_k(ranking, matches, gold, 2) == 1.0
+
+
+def test_match_outside_gold_is_not_a_hit() -> None:
+    # Rank 1 satisfies a gold-less entry only: no metric may credit it.
+    ranking = ["x", "b"]
+    matches = {"x": frozenset({"other"}), "b": frozenset({"g1"})}
+    gold = frozenset({"g1"})
+    assert hit_at_k(ranking, matches, gold, 1) == 0.0
+    assert recall_at_k(ranking, matches, gold, 1) == 0.0
+    assert hit_at_k(ranking, matches, gold, 2) == 1.0
