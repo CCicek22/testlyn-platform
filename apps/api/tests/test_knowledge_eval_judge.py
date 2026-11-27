@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 import pytest
+from testlyn_api.knowledge.evaluation import judge as judge_module
 from testlyn_api.knowledge.evaluation.judge import (
     JudgeError,
     judge_agreement,
@@ -149,6 +150,18 @@ async def test_timeout_becomes_judge_error() -> None:
 async def test_client_exception_becomes_judge_error_with_type_name() -> None:
     judge = FakeJudgeModel([ConnectionError("network down")])
     with pytest.raises(JudgeError, match="ConnectionError"):
+        await judge_context_relevance(judge, "q", "p")
+
+
+async def test_unexpected_parser_failure_becomes_judge_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(raw: object) -> None:
+        raise KeyError("relevant")
+
+    monkeypatch.setattr(judge_module, "parse_relevance_reply", broken)
+    judge = FakeJudgeModel([GOOD_RELEVANCE])
+    with pytest.raises(JudgeError, match="KeyError"):
         await judge_context_relevance(judge, "q", "p")
 
 

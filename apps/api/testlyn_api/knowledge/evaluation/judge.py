@@ -20,9 +20,11 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
+
+T = TypeVar("T")
 
 MAX_REPLY_CHARS = 4000
 MAX_REASON_CHARS = 500
@@ -184,6 +186,18 @@ def parse_faithfulness_reply(raw: object) -> FaithfulnessVerdict:
     )
 
 
+def _guarded(parse: Callable[[object], T], raw: object) -> T:
+    """Last line of defence: any slip in a parser becomes a JudgeError, not a crash."""
+    try:
+        return parse(raw)
+    except JudgeError:
+        raise
+    except (KeyError, TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise JudgeError(
+            f"judge reply could not be parsed: {type(exc).__name__}"
+        ) from exc
+
+
 async def _ask(judge: JudgeModel, prompt: str, deadline_s: float) -> object:
     try:
         async with asyncio.timeout(deadline_s):
@@ -202,7 +216,7 @@ async def judge_context_relevance(
     deadline_s: float = DEFAULT_DEADLINE_S,
 ) -> RelevanceVerdict:
     raw = await _ask(judge, build_relevance_prompt(question, passage), deadline_s)
-    return parse_relevance_reply(raw)
+    return _guarded(parse_relevance_reply, raw)
 
 
 async def judge_faithfulness(
@@ -215,7 +229,7 @@ async def judge_faithfulness(
 ) -> FaithfulnessVerdict:
     prompt = build_faithfulness_prompt(question, answer, passages)
     raw = await _ask(judge, prompt, deadline_s)
-    return parse_faithfulness_reply(raw)
+    return _guarded(parse_faithfulness_reply, raw)
 
 
 async def judge_passages(
