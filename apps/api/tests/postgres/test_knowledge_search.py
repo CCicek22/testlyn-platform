@@ -10,9 +10,10 @@ from collections.abc import AsyncIterator, Sequence
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -263,6 +264,35 @@ async def test_filtered_hnsw_returns_own_org_chunks_behind_closer_foreign_ones(
 
     assert len(outcome.results) == 3
     assert {r.document_title for r in outcome.results} == {"A doc"}
+
+
+async def test_equal_distance_chunks_come_back_in_chunk_id_order(
+    forced_hnsw_session: AsyncSession,
+) -> None:
+    """Ties in distance are broken by chunk id, so the leg is repeatable.
+
+    Forty chunks share one vector. Without the tie-break the index returns
+    them in graph order, which differs between builds.
+    """
+    org_id = await _org(forced_hnsw_session)
+    await _doc_with_vectors(
+        forced_hnsw_session, org_id, title="Ties", vectors=[_e(0)] * 40
+    )
+    rows = await forced_hnsw_session.execute(
+        select(KnowledgeChunk.id).where(KnowledgeChunk.org_id == org_id)
+    )
+    expected = sorted(rows.scalars().all())[:20]
+
+    hits = await search.vector_candidates(
+        forced_hnsw_session,
+        org_id=org_id,
+        project_id=None,
+        model_name=MODEL,
+        query_vector=_e(0),
+        limit=20,
+    )
+
+    assert [hit.chunk_id for hit in hits] == expected
 
 
 async def test_project_scoped_hnsw_skips_sibling_project_and_foreign_org_chunks(
@@ -561,3 +591,298 @@ async def test_search_settings_do_not_leak_to_the_pooled_connection(
         assert tuple(row) == ("off", "40")
     finally:
         await engine.dispose()
+
+
+# ── Keyword leg: any-term matching ────────────────────────────────────────────
+
+# Each hostile query is paired with the plain words it must behave like. The
+# lexemes are identical, so the result titles must be identical too.
+HOSTILE_PAIRS = [
+    ("'alpha' | 'beta'", "alpha beta"),
+    ("alpha & beta", "alpha beta"),
+    ('alpha "beta"', "alpha beta"),
+    ("alpha\\beta", "alpha beta"),
+    ("alpha ! beta", "alpha beta"),
+    ("alpha (beta) :* <-> gamma", "alpha beta gamma"),
+    ("alpha\x07beta", "alpha beta"),
+    ("alpha\tbeta\r\n", "alpha beta"),
+    ("alpha 'beta", "alpha beta"),
+    ("a'b\"c`d", "b c d"),
+    ("ünïcödé alpha", "ünïcödé alpha"),
+    ("alpha " + "x" * 3000 + " beta", "alpha " + "x" * 3000 + " beta"),
+]
+
+
+async def _keyword_titles(
+    session: AsyncSession, org_id: uuid.UUID, query: str
+) -> list[str]:
+    outcome = await _search(
+        session, org_id=org_id, query=query, mode="keyword", top_k=10
+    )
+    return [r.document_title for r in outcome.results]
+
+
+async def test_keyword_any_term_returns_chunk_with_only_one_term(
+    session: AsyncSession,
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "Only alpha appears in this note.", title="Alpha")
+    await _ingest(session, org_id, "Nothing relevant here.", title="Other")
+
+    titles = await _keyword_titles(session, org_id, "alpha missingterm")
+
+    assert titles == ["Alpha"]
+
+
+async def test_keyword_ranks_chunk_with_two_terms_above_one_term(
+    session: AsyncSession,
+) -> None:
+    """Fixture-specific: ts_rank_cd scores occurrences and proximity, not a
+    count of distinct terms, so this only pins this pair of chunks."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha only here.", title="One term")
+    await _ingest(session, org_id, "alpha and beta together.", title="Two terms")
+
+    titles = await _keyword_titles(session, org_id, "alpha beta")
+
+    assert titles == ["Two terms", "One term"]
+
+
+@pytest.mark.parametrize("query", ["the and of", "!!! ... ???", "a an the", "  "])
+async def test_stopword_or_punctuation_only_query_returns_nothing(
+    session: AsyncSession, query: str
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "The alpha note of the day.", title="Note")
+
+    assert await _keyword_titles(session, org_id, query) == []
+
+
+@pytest.mark.parametrize(("hostile", "plain"), HOSTILE_PAIRS)
+async def test_hostile_keyword_input_matches_its_plain_words(
+    session: AsyncSession, hostile: str, plain: str
+) -> None:
+    org_id = await _org(session)
+    foreign_org = await _org(session)
+    await _ingest(session, org_id, "alpha beta gamma delta", title="Mine")
+    await _ingest(session, foreign_org, "alpha beta gamma delta", title="Foreign")
+
+    hostile_titles = await _keyword_titles(session, org_id, hostile)
+
+    assert hostile_titles == await _keyword_titles(session, org_id, plain)
+    assert "Foreign" not in hostile_titles
+
+
+async def test_injected_syntax_is_dropped_not_interpreted(
+    session: AsyncSession,
+) -> None:
+    """Quotes, & and | do not bind anything: each word is an independent OR branch."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha note", title="Alpha")
+    await _ingest(session, org_id, "beta note", title="Beta")
+    await _ingest(session, org_id, "gamma note", title="Gamma")
+
+    for query in [
+        "'alpha' | 'beta'",
+        "alpha & beta",
+        "alpha:* | beta",
+        "(alpha) !beta",
+    ]:
+        assert sorted(await _keyword_titles(session, org_id, query)) == [
+            "Alpha",
+            "Beta",
+        ], query
+
+
+async def test_quoted_phrase_is_matched_as_loose_terms(session: AsyncSession) -> None:
+    """Quote characters are dropped. "gate timeout" matches a chunk that has only
+    "timeout", as the unquoted words would."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "The timeout is long.", title="Timeout only")
+
+    assert await _keyword_titles(session, org_id, '"gate timeout"') == ["Timeout only"]
+
+
+async def test_minus_is_not_an_exclusion_operator(session: AsyncSession) -> None:
+    """A leading minus is dropped. The excluded word still matches."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "beta alone.", title="Beta")
+
+    assert await _keyword_titles(session, org_id, "alpha -beta") == ["Beta"]
+
+
+async def test_or_is_an_english_stopword_and_is_dropped(session: AsyncSession) -> None:
+    """ "or" is removed by the english stopword list, like "the". "alpha or beta"
+    is the same query as "alpha beta"."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "beta alone.", title="Beta")
+    await _ingest(session, org_id, "alpha alone.", title="Alpha")
+
+    assert sorted(await _keyword_titles(session, org_id, "alpha or beta")) == [
+        "Alpha",
+        "Beta",
+    ]
+    assert sorted(await _keyword_titles(session, org_id, "alpha beta")) == [
+        "Alpha",
+        "Beta",
+    ]
+
+
+async def test_any_term_keyword_respects_org_and_project_scope(
+    session: AsyncSession,
+) -> None:
+    """Two-term query. "beta" appears only in a foreign org and a sibling project,
+    so neither may be returned for a project-scoped search."""
+    org_a = await _org(session)
+    org_b = await _org(session)
+    project = await _project(session, org_a, "Scoped")
+    sibling = await _project(session, org_a, "Sibling")
+    await _ingest(session, org_a, "alpha in org wide", title="Org Wide")
+    await _ingest(
+        session, org_a, "alpha in project", title="Project", project_id=project
+    )
+    await _ingest(
+        session, org_a, "beta in sibling", title="Sibling", project_id=sibling
+    )
+    await _ingest(session, org_b, "alpha and beta in foreign org", title="Foreign")
+
+    scoped = await _search(
+        session, org_id=org_a, query="alpha beta", mode="keyword", project_id=project
+    )
+    org_wide = await _search(session, org_id=org_a, query="alpha beta", mode="keyword")
+
+    assert sorted(r.document_title for r in scoped.results) == ["Org Wide", "Project"]
+    assert sorted(r.document_title for r in org_wide.results) == [
+        "Org Wide",
+        "Project",
+        "Sibling",
+    ]
+
+
+async def test_keyword_query_with_forty_distinct_words_is_capped(
+    session: AsyncSession,
+) -> None:
+    """Word 1 is kept, word 40 is past KEYWORD_MAX_TERMS and dropped."""
+    words = [f"word{chr(97 + n // 26)}{chr(97 + n % 26)}" for n in range(40)]
+    org_id = await _org(session)
+    await _ingest(session, org_id, f"only {words[0]} here", title="First")
+    await _ingest(session, org_id, f"only {words[39]} here", title="Last")
+
+    titles = await _keyword_titles(session, org_id, " ".join(words))
+
+    assert titles == ["First"]
+
+
+@pytest.mark.parametrize("word_count", [0, 1, search.KEYWORD_MAX_TERMS, 33, 40])
+async def test_built_query_never_has_more_than_the_cap(
+    session: AsyncSession, word_count: int
+) -> None:
+    """numnode of a cap-sized OR is 2 * 32 - 1 = 63; 1000 hostile chars stay under."""
+    words = " ".join(f"term{n}x" for n in range(word_count))
+    nodes = await session.scalar(select(func.numnode(search.keyword_tsquery(words))))
+
+    assert nodes <= 2 * search.KEYWORD_MAX_TERMS - 1
+
+
+async def test_hostile_thousand_chars_stay_under_the_node_cap(
+    session: AsyncSession,
+) -> None:
+    hostile = ("alpha-beta.gamma/delta 'x' & | ! (y) " * 40)[:1000]
+    nodes = await session.scalar(select(func.numnode(search.keyword_tsquery(hostile))))
+
+    assert 0 < nodes <= 2 * search.KEYWORD_MAX_TERMS - 1
+
+
+async def test_url_path_with_apostrophe_round_trips(session: AsyncSession) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "see x.com/it's/ok for details", title="Url")
+
+    assert await _keyword_titles(session, org_id, "x.com/it's/ok") == ["Url"]
+    assert await _keyword_titles(session, org_id, "see x.com/it's/ok for details") == [
+        "Url"
+    ]
+
+
+async def test_ampersand_inside_a_term_round_trips(session: AsyncSession) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "the route /a&b is slow", title="Route")
+
+    assert await _keyword_titles(session, org_id, "/a&b") == ["Route"]
+    assert await _keyword_titles(session, org_id, "slow /a&b") == ["Route"]
+
+
+async def test_keyword_timeout_raises_and_the_session_recovers(
+    engine: AsyncEngine, session: AsyncSession
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha note", title="Alpha")
+    await session.commit()
+
+    async with engine.begin() as blocker:
+        await blocker.execute(
+            text("LOCK TABLE knowledge_chunks IN ACCESS EXCLUSIVE MODE")
+        )
+        with pytest.raises(search.KeywordSearchTimeout):
+            await search.run_search(
+                session,
+                org_id=org_id,
+                project_id=None,
+                query="alpha",
+                mode="keyword",
+                top_k=5,
+                embedder=HashingEmbedder(),
+                reranker=None,
+                embed_deadline_s=None,
+                rerank_deadline_s=None,
+                keyword_timeout_ms=1,
+            )
+
+    outcome = await _search(session, org_id=org_id, query="alpha", mode="keyword")
+    assert [r.document_title for r in outcome.results] == ["Alpha"]
+    assert (await session.execute(text("SHOW statement_timeout"))).scalar_one() == "0"
+
+
+async def test_keyword_timeout_setting_is_restored_after_a_normal_search(
+    session: AsyncSession,
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha note", title="Alpha")
+
+    outcome = await search.run_search(
+        session,
+        org_id=org_id,
+        project_id=None,
+        query="alpha",
+        mode="hybrid",
+        top_k=5,
+        embedder=HashingEmbedder(),
+        reranker=None,
+        embed_deadline_s=None,
+        rerank_deadline_s=None,
+        keyword_timeout_ms=5000,
+    )
+
+    assert [r.document_title for r in outcome.results] == ["Alpha"]
+    assert (await session.execute(text("SHOW statement_timeout"))).scalar_one() == "0"
+
+
+async def test_keyword_timeout_is_restored_inside_the_same_transaction(
+    session: AsyncSession,
+) -> None:
+    """A caller that keeps its transaction open gets its own timeout back, so a
+    later statement does not run under the keyword limit."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha note", title="Alpha")
+
+    hits = await search.keyword_candidates(
+        session,
+        org_id=org_id,
+        project_id=None,
+        query="alpha",
+        limit=5,
+        timeout_ms=5000,
+    )
+
+    assert len(hits) == 1
+    assert session.in_transaction()
+    assert (await session.execute(text("SHOW statement_timeout"))).scalar_one() == "0"

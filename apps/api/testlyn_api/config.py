@@ -158,6 +158,7 @@ class Settings(BaseSettings):
     knowledge_max_chunks: int = 2000
     knowledge_embedding_deadline_seconds: float = 120.0
     knowledge_search_embedding_deadline_seconds: float = 10.0
+    knowledge_search_keyword_timeout_ms: int = 3000
     knowledge_reranker_url: str = ""
     knowledge_reranker_model: str = "reranker"
     knowledge_reranker_api_key: str = ""

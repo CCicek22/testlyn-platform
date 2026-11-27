@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 import structlog
-from sqlalchemy import cast, column, func, literal, or_, select
-from sqlalchemy.dialects.postgresql import REGCONFIG, TSVECTOR
+from sqlalchemy import ARRAY, Text, cast, column, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import REGCONFIG, TSQUERY, TSVECTOR
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.knowledge.embeddings import Embedder, EmbeddingError
@@ -28,6 +29,9 @@ RRF_K = 60
 MIN_CANDIDATES = 20
 MAX_CANDIDATES = 100
 SEARCH_LANGUAGE = "english"
+# Lexemes kept in a keyword query. Each lexeme is one OR branch of the GIN
+# lookup, so this bounds the work a long query can cause.
+KEYWORD_MAX_TERMS = 32
 HNSW_MIN_EF_SEARCH = 40
 HNSW_MAX_EF_SEARCH = 1000
 
@@ -171,12 +175,17 @@ def build_vector_statement(
     query_vector: list[float],
     limit: int,
 ):  # type: ignore[no-untyped-def]
-    """ORDER BY cosine distance so the HNSW index serves the query."""
+    """ORDER BY cosine distance so the HNSW index serves the query.
+
+    Chunk id breaks distance ties. The planner keeps the index scan and adds an
+    incremental sort, so equal-distance chunks come back in the same order on
+    every run.
+    """
     distance = KnowledgeChunk.embedding.cosine_distance(query_vector)
     return (
         _base_select(org_id, project_id)
         .where(KnowledgeChunk.embedding_model == model_name)
-        .order_by(distance)
+        .order_by(distance, KnowledgeChunk.id)
         .limit(limit)
     )
 
@@ -215,15 +224,33 @@ async def vector_candidates(
     return await _fetch_hits(session, stmt)
 
 
+class KeywordSearchTimeout(Exception):
+    """The keyword statement hit its statement timeout. The transaction is rolled back."""
+
+
 def keyword_tsquery(query: str):  # type: ignore[no-untyped-def]
-    """websearch_to_tsquery with the language bound as a REGCONFIG parameter."""
+    """Any-term tsquery of at most KEYWORD_MAX_TERMS lexemes, built in SQL.
+
+    plainto_tsquery joins lexemes with " & " and never puts a space inside one,
+    so splitting on " & " gives one lexeme per element. The first
+    KEYWORD_MAX_TERMS are kept and joined with " | ".
+    """
     language = cast(literal(SEARCH_LANGUAGE), REGCONFIG)
-    return func.websearch_to_tsquery(language, query)
+    anded = cast(func.plainto_tsquery(language, query), Text)
+    lexemes = func.string_to_array(anded, " & ", type_=ARRAY(Text))
+    capped = lexemes[1:KEYWORD_MAX_TERMS]
+    return cast(func.array_to_string(capped, " | "), TSQUERY)
+
+
+def keyword_query(query: str):  # type: ignore[no-untyped-def]
+    """The tsquery as a scalar subquery: an uncorrelated InitPlan, so the GIN
+    predicate still sees a pseudo-constant and the query is parsed once per use."""
+    return select(keyword_tsquery(query)).scalar_subquery()
 
 
 def keyword_match(query: str):  # type: ignore[no-untyped-def]
     """WHERE clause that the GIN index on text_tsv can serve."""
-    return _TEXT_TSV.op("@@")(keyword_tsquery(query))
+    return _TEXT_TSV.op("@@")(keyword_query(query))
 
 
 def build_keyword_statement(
@@ -234,10 +261,10 @@ def build_keyword_statement(
     limit: int,
 ):  # type: ignore[no-untyped-def]
     """Full-text statement. The language is a bound parameter, not SQL text."""
-    tsquery = keyword_tsquery(query)
+    tsquery = keyword_query(query)
     return (
         _base_select(org_id, project_id)
-        .where(keyword_match(query))
+        .where(_TEXT_TSV.op("@@")(tsquery))
         .order_by(func.ts_rank_cd(_TEXT_TSV, tsquery).desc(), KnowledgeChunk.id)
         .limit(limit)
     )
@@ -250,12 +277,40 @@ async def keyword_candidates(
     project_id: uuid.UUID | None,
     query: str,
     limit: int,
+    timeout_ms: int | None = None,
 ) -> list[Hit]:
-    """Full-text matches ranked by ts_rank_cd. websearch syntax never raises."""
+    """Any-term full-text matches ranked by ts_rank_cd. Query text never raises.
+
+    With ``timeout_ms`` the statement runs under a transaction-local
+    statement_timeout, restored to its previous value afterwards. On timeout the
+    transaction is rolled back and ``KeywordSearchTimeout`` is raised.
+    """
     stmt = build_keyword_statement(
         org_id=org_id, project_id=project_id, query=query, limit=limit
     )
-    return await _fetch_hits(session, stmt)
+    if timeout_ms is None:
+        return await _fetch_hits(session, stmt)
+    previous = (
+        await session.execute(select(func.current_setting("statement_timeout")))
+    ).scalar_one()
+    await session.execute(
+        select(func.set_config("statement_timeout", str(timeout_ms), True))
+    )
+    try:
+        hits = await _fetch_hits(session, stmt)
+    except DBAPIError as exc:
+        if not _is_statement_timeout(exc):
+            raise
+        await session.rollback()
+        raise KeywordSearchTimeout() from exc
+    await session.execute(select(func.set_config("statement_timeout", previous, True)))
+    return hits
+
+
+def _is_statement_timeout(exc: DBAPIError) -> bool:
+    """True for Postgres SQLSTATE 57014 (query_canceled), however the driver wraps it."""
+    original = getattr(exc.orig, "__cause__", None) or exc.orig
+    return getattr(original, "sqlstate", None) == "57014"
 
 
 async def _embed_query(
@@ -299,12 +354,14 @@ async def run_search(
     reranker: Reranker | None,
     embed_deadline_s: float | None,
     rerank_deadline_s: float | None,
+    keyword_timeout_ms: int | None = None,
 ) -> SearchOutcome:
     """Run the requested legs, fuse them, and optionally rerank.
 
     Raises ``EmbeddingError`` when the query embedding fails or exceeds
     ``embed_deadline_s``. A reranker failure never raises: the fused order is
-    returned with ``reranked=False``.
+    returned with ``reranked=False``. Raises ``KeywordSearchTimeout`` when the
+    keyword statement exceeds ``keyword_timeout_ms`` (None: no timeout).
     """
     limit = candidate_limit(top_k)
 
@@ -333,6 +390,7 @@ async def run_search(
             project_id=project_id,
             query=query,
             limit=limit,
+            timeout_ms=keyword_timeout_ms,
         )
     await session.commit()
 
