@@ -23,9 +23,9 @@ API: <http://localhost:8080>, Web: <http://localhost:3000>.
 
 `DEV_AUTH_BYPASS=true` skips Identity Platform JWT verify and signs you in as `dev@testlyn.io`.
 
-## 1. GCP project (Example Co)
+## 1. GCP project
 
-- [ ] Get actual Example Co GCP project ID (current placeholder: `example-project`).
+- [ ] Get the actual GCP project ID (current placeholder: `example-project`).
 - [ ] Set `gcloud config set project <id>`.
 - [ ] Enable APIs: `compute`, `run`, `cloudbuild`, `cloudtasks`, `cloudscheduler`, `bigquery`, `sqladmin`, `secretmanager`, `artifactregistry`, `identitytoolkit`, `aiplatform`, `redis`, `storage`.
 - [ ] Create Terraform state bucket: `gsutil mb -p <id> -l us-central1 gs://testlyn-tfstate`.
@@ -81,5 +81,5 @@ Order matters first time:
 ## 8. Domain (testlyn.io)
 
 - [ ] Register domain.
-- [ ] Cloud DNS zone in Example Co project.
+- [ ] Cloud DNS zone in the GCP project.
 - [ ] Cloud Run domain mapping for `testlyn.io` → web, `api.testlyn.io` → api.
