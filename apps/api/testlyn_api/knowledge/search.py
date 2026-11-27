@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import structlog
-from sqlalchemy import cast, column, func, literal_column, or_, select
+from sqlalchemy import cast, column, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import REGCONFIG, TSVECTOR
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -215,6 +215,34 @@ async def vector_candidates(
     return await _fetch_hits(session, stmt)
 
 
+def keyword_tsquery(query: str):  # type: ignore[no-untyped-def]
+    """websearch_to_tsquery with the language bound as a REGCONFIG parameter."""
+    language = cast(literal(SEARCH_LANGUAGE), REGCONFIG)
+    return func.websearch_to_tsquery(language, query)
+
+
+def keyword_match(query: str):  # type: ignore[no-untyped-def]
+    """WHERE clause that the GIN index on text_tsv can serve."""
+    return _TEXT_TSV.op("@@")(keyword_tsquery(query))
+
+
+def build_keyword_statement(
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    query: str,
+    limit: int,
+):  # type: ignore[no-untyped-def]
+    """Full-text statement. The language is a bound parameter, not SQL text."""
+    tsquery = keyword_tsquery(query)
+    return (
+        _base_select(org_id, project_id)
+        .where(keyword_match(query))
+        .order_by(func.ts_rank_cd(_TEXT_TSV, tsquery).desc(), KnowledgeChunk.id)
+        .limit(limit)
+    )
+
+
 async def keyword_candidates(
     session: AsyncSession,
     *,
@@ -224,13 +252,8 @@ async def keyword_candidates(
     limit: int,
 ) -> list[Hit]:
     """Full-text matches ranked by ts_rank_cd. websearch syntax never raises."""
-    language = cast(literal_column(f"'{SEARCH_LANGUAGE}'"), REGCONFIG)
-    tsquery = func.websearch_to_tsquery(language, query)
-    stmt = (
-        _base_select(org_id, project_id)
-        .where(_TEXT_TSV.op("@@")(tsquery))
-        .order_by(func.ts_rank_cd(_TEXT_TSV, tsquery).desc(), KnowledgeChunk.id)
-        .limit(limit)
+    stmt = build_keyword_statement(
+        org_id=org_id, project_id=project_id, query=query, limit=limit
     )
     return await _fetch_hits(session, stmt)
 
