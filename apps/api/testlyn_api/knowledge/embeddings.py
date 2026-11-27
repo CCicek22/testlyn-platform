@@ -21,7 +21,8 @@ import httpx
 from testlyn_api.config import get_settings
 from testlyn_api.models.knowledge import KNOWLEDGE_EMBEDDING_DIM
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# Unicode word characters, so Cyrillic, CJK and accented text produce features.
+_TOKEN_RE = re.compile(r"\w+")
 
 
 class EmbeddingError(Exception):
@@ -36,10 +37,12 @@ class Embedder(Protocol):
 
 
 class HashingEmbedder:
-    """Signed feature hashing of lowercased unigrams and bigrams, L2-normalised.
+    """Signed feature hashing of casefolded word unigrams and bigrams, L2-normalised.
 
     Deterministic across processes (blake2b, not Python's salted ``hash``).
-    Empty or token-free text yields the zero vector.
+    Text with no word characters (punctuation only) hashes the whole text as one
+    feature, so every input yields a non-zero, unit-length vector and stays
+    findable by cosine search. That fallback is not a semantic signal.
     """
 
     def __init__(self, dim: int = KNOWLEDGE_EMBEDDING_DIM) -> None:
@@ -50,10 +53,14 @@ class HashingEmbedder:
         return [self._embed_one(t) for t in texts]
 
     def _embed_one(self, text: str) -> list[float]:
-        tokens = _TOKEN_RE.findall(text.lower())
-        features = tokens + [
-            f"{a} {b}" for a, b in zip(tokens, tokens[1:], strict=False)
-        ]
+        folded = text.casefold()
+        tokens = _TOKEN_RE.findall(folded)
+        if tokens:
+            features = tokens + [
+                f"{a} {b}" for a, b in zip(tokens, tokens[1:], strict=False)
+            ]
+        else:
+            features = [folded.strip() or "<empty>"]
         vec = [0.0] * self.dim
         for feature in features:
             digest = int.from_bytes(
@@ -127,6 +134,7 @@ class OpenAICompatEmbedder:
 
         try:
             data = response.json()["data"]
+            indices = [item["index"] for item in data]
             ordered = sorted(data, key=lambda item: item["index"])
             vectors = [[float(x) for x in item["embedding"]] for item in ordered]
         except (KeyError, TypeError, ValueError) as exc:
@@ -136,11 +144,15 @@ class OpenAICompatEmbedder:
             raise EmbeddingError(
                 f"embedding response has {len(vectors)} vectors for {len(batch)} inputs"
             )
+        if sorted(indices) != list(range(len(batch))):
+            raise EmbeddingError("embedding response indices do not match the batch")
         for vec in vectors:
             if len(vec) != self.dim:
                 raise EmbeddingError(
                     f"embedding has dimension {len(vec)}, expected {self.dim}"
                 )
+            if not all(math.isfinite(x) for x in vec):
+                raise EmbeddingError("embedding contains non-finite values")
         return vectors
 
 

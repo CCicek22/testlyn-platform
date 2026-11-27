@@ -26,11 +26,6 @@ async def test_hashing_dim_and_normalisation() -> None:
     assert math.isclose(math.sqrt(sum(x * x for x in vec)), 1.0, rel_tol=1e-9)
 
 
-async def test_hashing_empty_text_is_zero_vector() -> None:
-    (vec,) = await HashingEmbedder().embed(["  !!! "])
-    assert all(x == 0.0 for x in vec)
-
-
 async def test_hashing_is_deterministic() -> None:
     embedder = HashingEmbedder()
     first = await embedder.embed(["Deploy the API service"])
@@ -221,3 +216,70 @@ def test_get_embedder_selects_provider(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
     assert isinstance(embeddings.get_embedder(), OpenAICompatEmbedder)
+
+
+async def test_hashing_golden_bucket_and_sign() -> None:
+    # Fixed by blake2b(digest_size=8): bucket 95, sign -1. Fails if the hash
+    # ever becomes salted (e.g. built-in hash()) or changes algorithm.
+    (vec,) = await HashingEmbedder().embed(["rollback"])
+    nonzero = [(i, x) for i, x in enumerate(vec) if x != 0.0]
+    assert nonzero == [(95, -1.0)]
+
+
+async def test_hashing_cyrillic_and_cjk_are_not_zero_and_findable() -> None:
+    embedder = HashingEmbedder()
+    cyr_query, cyr_similar, cyr_other, cjk = await embedder.embed(
+        [
+            "откат релиза",
+            "как выполнить откат релиза",
+            "счёт за услуги",
+            "发布回滚步骤",
+        ]
+    )
+    for vec in (cyr_query, cyr_similar, cyr_other, cjk):
+        assert any(x != 0.0 for x in vec)
+    assert _cosine(cyr_query, cyr_similar) > _cosine(cyr_query, cyr_other)
+
+
+async def test_hashing_punctuation_only_text_is_non_zero_and_deterministic() -> None:
+    embedder = HashingEmbedder()
+    (first,) = await embedder.embed(["--- !!! ---"])
+    (second,) = await HashingEmbedder().embed(["--- !!! ---"])
+    assert any(x != 0.0 for x in first)
+    assert first == second
+    assert math.isclose(math.sqrt(sum(x * x for x in first)), 1.0, rel_tol=1e-9)
+
+
+def _raw_response(payload: bytes) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=payload, headers={"content-type": "application/json"}
+        )
+
+    return httpx.MockTransport(handler)
+
+
+async def test_openai_compat_rejects_duplicate_indices() -> None:
+    dim = KNOWLEDGE_EMBEDDING_DIM
+    vec = [0.0] * dim
+    payload = json.dumps(
+        {"data": [{"index": 0, "embedding": vec}, {"index": 0, "embedding": vec}]}
+    ).encode()
+    embedder = OpenAICompatEmbedder(
+        base_url="http://embed.test/v1", model="m", transport=_raw_response(payload)
+    )
+    with pytest.raises(EmbeddingError, match="indices"):
+        await embedder.embed(["a", "b"])
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+async def test_openai_compat_rejects_non_finite_values(bad: str) -> None:
+    dim = KNOWLEDGE_EMBEDDING_DIM
+    values = ["0.0"] * dim
+    values[3] = bad
+    payload = ('{"data":[{"index":0,"embedding":[' + ",".join(values) + "]}]}").encode()
+    embedder = OpenAICompatEmbedder(
+        base_url="http://embed.test/v1", model="m", transport=_raw_response(payload)
+    )
+    with pytest.raises(EmbeddingError, match="non-finite"):
+        await embedder.embed(["a"])
