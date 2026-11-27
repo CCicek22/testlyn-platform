@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -138,6 +139,17 @@ class Settings(BaseSettings):
     chat_upstream_connect_timeout_s: float = 5.0
     chat_use_redis_session: bool = False
 
+    # --- Knowledge store (embeddings) ---
+    # "hashing" is an offline lexical stand-in (default, tests, CI).
+    # "openai_compat" calls an OpenAI-style /v1/embeddings endpoint.
+    knowledge_embedding_provider: Literal["hashing", "openai_compat"] = "hashing"
+    knowledge_embedding_base_url: str = ""
+    knowledge_embedding_model: str = "embeddinggemma"
+    knowledge_embedding_api_key: str = ""
+    knowledge_embedding_timeout_s: float = 30.0
+    knowledge_embedding_batch_size: int = 32
+    knowledge_max_document_chars: int = 500_000
+
     # --- Stripe ---
     stripe_secret_key: str = "sk_test_PLACEHOLDER"
     stripe_webhook_secret: str = "whsec_PLACEHOLDER"
@@ -165,6 +177,12 @@ class Settings(BaseSettings):
         if v not in {"cloud", "docker"}:
             raise ValueError("run_mode must be 'cloud' or 'docker'")
         return v
+
+    @model_validator(mode="after")
+    def _knowledge_embedder_needs_url(self) -> Settings:
+        if self.knowledge_embedding_provider == "openai_compat" and not self.knowledge_embedding_base_url:
+            raise ValueError("knowledge_embedding_base_url is required when provider is openai_compat")
+        return self
 
     @model_validator(mode="after")
     def _no_bypass_in_cloud(self) -> Settings:
