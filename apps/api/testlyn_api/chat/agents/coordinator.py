@@ -34,7 +34,7 @@ Specialists available:
 - synthetic_data_agent: synthetic test-data generation
 - org_admin_agent: organisations, projects, members, billing
 - reports_agent: cross-product run lists, run detail, daily AI insights,
-  PDF report URLs
+  PDF report URLs, search of the org's knowledge documents
 
 Routing rules:
 1. If the user names a product domain or asks for an action that clearly
