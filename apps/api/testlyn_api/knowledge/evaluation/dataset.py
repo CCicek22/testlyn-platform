@@ -47,6 +47,7 @@ RELEVANT_KEYS = frozenset({"document", "answer_span"})
 _WORD_RE = re.compile(r"\w+")
 # One character class under a star: linear on any input.
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-]*")
+_BACKTICK_RE = re.compile(r"`([^`\n]+)`")
 
 
 class DatasetError(ValueError):
@@ -181,13 +182,18 @@ def _count_occurrences(text: str, span: str) -> int:
     return count
 
 
+def _is_identifier(tok: str) -> bool:
+    """Digit, underscore, dot, or a capital after the first character."""
+    return any(c.isdigit() or c in "_." for c in tok) or any(
+        c.isupper() for c in tok[1:]
+    )
+
+
 def _rare_tokens(text: str) -> set[str]:
-    return {
-        tok
-        for tok in _TOKEN_RE.findall(text)
-        if len(tok) >= RARE_TOKEN_MIN
-        and any(c.isdigit() or c == "_" or c.isupper() for c in tok)
-    }
+    """Identifier-shaped words and backtick-quoted terms, at least 4 characters."""
+    quoted = {term.strip() for term in _BACKTICK_RE.findall(text)}
+    plain = {tok for tok in _TOKEN_RE.findall(text) if _is_identifier(tok)}
+    return {tok for tok in quoted | plain if len(tok) >= RARE_TOKEN_MIN}
 
 
 def _long_words(text: str) -> set[str]:
@@ -212,12 +218,15 @@ def validate_eval_set(documents: list[Document], queries: list[Query]) -> EvalSe
             f"expected {MIN_QUERIES} to {MAX_QUERIES} queries, found {len(queries)}"
         )
 
+    if len({doc.text for doc in documents}) != len(documents):
+        raise DatasetError("two documents have identical text")
     by_id = {doc.doc_id: doc for doc in documents}
     chunks = {
         doc.doc_id: [c.text for c in chunk_markdown(doc.text)] for doc in documents
     }
     seen_ids: set[str] = set()
     per_kind: dict[str, int] = {kind: 0 for kind in KINDS}
+    span_owner: dict[tuple[str, str], str] = {}
 
     for query in queries:
         if query.id in seen_ids:
@@ -227,6 +236,11 @@ def validate_eval_set(documents: list[Document], queries: list[Query]) -> EvalSe
         for rel in query.relevant:
             if rel.document not in by_id:
                 raise DatasetError(f"query {query.id}: unknown document {rel.document}")
+            owner = span_owner.setdefault((rel.document, rel.answer_span), query.id)
+            if owner != query.id:
+                raise DatasetError(
+                    f"queries {owner} and {query.id} share answer_span in {rel.document}"
+                )
             occurrences = _count_occurrences(by_id[rel.document].text, rel.answer_span)
             if occurrences == 0:
                 raise DatasetError(

@@ -234,3 +234,38 @@ def test_bool_is_not_accepted_as_string_or_int(tmp_path: Path) -> None:
     corpus, qpath = _write(tmp_path, docs, queries)
     with pytest.raises(DatasetError, match="line 1"):
         load_eval_set(corpus, qpath)
+
+
+def test_identical_document_text_fails(tmp_path: Path) -> None:
+    docs = _docs()
+    docs["doc02"] = docs["doc01"]
+    corpus, qpath = _write(tmp_path, docs, _queries(docs))
+    with pytest.raises(DatasetError, match="identical"):
+        load_eval_set(corpus, qpath)
+
+
+def test_two_queries_sharing_a_document_span_fails(tmp_path: Path) -> None:
+    docs = _docs()
+    queries = _queries(docs)
+    twin = dict(queries[0], id="q-twin")
+    queries.append(twin)
+    corpus, qpath = _write(tmp_path, docs, queries)
+    with pytest.raises(DatasetError, match="share"):
+        load_eval_set(corpus, qpath)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("What Happens Here", set()),
+        ("Use the Retry Policy", set()),
+        ("set gate.db_pool_size", {"gate.db_pool_size"}),
+        ("SpoolBacklogHigh fires", {"SpoolBacklogHigh"}),
+        ("error 5042 raised", {"5042"}),
+        ("the `retry` flag", {"retry"}),
+    ],
+)
+def test_rare_tokens_need_identifier_shape(text: str, expected: set[str]) -> None:
+    from testlyn_api.knowledge.evaluation.dataset import _rare_tokens
+
+    assert _rare_tokens(text) == expected
