@@ -262,7 +262,15 @@ async def search_knowledge(
             reranker=reranker,
             embed_deadline_s=settings.knowledge_search_embedding_deadline_seconds,
             rerank_deadline_s=settings.knowledge_reranker_deadline_seconds,
+            keyword_timeout_ms=settings.knowledge_search_keyword_timeout_ms,
         )
+    except search.KeywordSearchTimeout as exc:
+        # Only the error type is logged: the query text stays out of the logs.
+        log.warning("knowledge.keyword_timeout", reason=type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search timed out, try a shorter query",
+        ) from exc
     except EmbeddingError as exc:
         # Generic message only: no endpoint, status body, or key reaches the client.
         log.warning("knowledge.embedding_unavailable", reason=str(exc))

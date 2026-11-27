@@ -575,3 +575,33 @@ async def test_query_padded_past_the_raw_cap_is_422(client: AsyncClient) -> None
 
     assert resp.status_code == 422
     assert "at most 4000" in str(resp.json()["detail"])
+
+
+async def test_keyword_timeout_is_503_with_generic_message(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org_id = await _create_org(client, "Timeout Search Org")
+
+    async def timed_out(session: AsyncSession, **kwargs: Any) -> list[search.Hit]:
+        raise search.KeywordSearchTimeout()
+
+    monkeypatch.setattr(search, "keyword_candidates", timed_out)
+
+    resp = await _post_search(client, org_id, mode="keyword")
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "Search timed out, try a shorter query"
+    assert "Traceback" not in resp.text
+
+
+async def test_keyword_leg_gets_the_configured_timeout(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org_id = await _create_org(client, "Timeout Config Org")
+    recorder = _Recorder([], [])
+    _install_legs(monkeypatch, recorder)
+
+    await _post_search(client, org_id, mode="keyword")
+
+    keyword_calls = [kw for name, kw in recorder.calls if name == "keyword"]
+    assert keyword_calls[0]["timeout_ms"] == 3000
