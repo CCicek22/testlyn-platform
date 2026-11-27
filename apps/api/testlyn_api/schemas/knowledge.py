@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -59,3 +61,40 @@ class KnowledgeDocumentOut(BaseModel):
 
 class KnowledgeDocumentDetail(KnowledgeDocumentOut):
     chunks: list[KnowledgeChunkOut]
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str
+    project_id: uuid.UUID | None = None
+    top_k: int = Field(default=5, ge=1, le=20)
+    mode: Literal["hybrid", "vector", "keyword"] = "hybrid"
+
+    @field_validator("query")
+    @classmethod
+    def _check_query(cls, value: str) -> str:
+        value = _require_storable_text(value).strip()
+        if not 1 <= len(value) <= 1000:
+            raise ValueError("query must be 1 to 1000 characters after trimming")
+        return value
+
+
+class KnowledgeSearchResult(BaseModel):
+    chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    document_title: str
+    source: str
+    heading: str | None
+    text: str
+    char_start: int
+    char_end: int
+    score: float
+    vector_rank: int | None
+    keyword_rank: int | None
+
+    model_config = {"from_attributes": True}
+
+
+class KnowledgeSearchResponse(BaseModel):
+    results: list[KnowledgeSearchResult]
+    mode: str
+    reranked: bool
