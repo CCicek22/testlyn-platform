@@ -3,15 +3,17 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+const COMPOSE_FILE = path.resolve(__dirname, "../../../infra/docker-compose.dev.yml");
+
 const BASE_URL = process.env["PLAYWRIGHT_BASE_URL"] ?? "http://localhost:3000";
-const EVIDENCE_DIR = "./docs/ui-test-evidence";
+const EVIDENCE_DIR = path.resolve(__dirname, "../../../docs/ui-test-evidence");
 
 test.describe("Project Creator - E2E Integration Test", () => {
   test.beforeAll(async () => {
     // 0. Database cleanup to ensure reproducibility
     try {
       execSync(
-        `docker compose -f ./infra/docker-compose.dev.yml exec -T postgres psql -U testlyn_api -d testlyn -c "DELETE FROM projects WHERE name = 'UI Team Integration Project';"`
+        `docker compose -f ${COMPOSE_FILE} exec -T postgres psql -U testlyn_api -d testlyn -c "DELETE FROM projects WHERE name = 'UI Team Integration Project';"`
       );
       console.log("Database cleaned up successfully: deleted existing project 'UI Team Integration Project'.");
     } catch (err) {

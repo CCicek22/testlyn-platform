@@ -4,7 +4,7 @@ import path from "node:path";
 
 const BASE_URL = process.env["PLAYWRIGHT_BASE_URL"] ?? "http://localhost:3000";
 const API_BASE_URL = "http://localhost:8080";
-const EVIDENCE_DIR = "./docs/ui-test-evidence";
+const EVIDENCE_DIR = path.resolve(__dirname, "../../../docs/ui-test-evidence");
 
 interface ConsoleTrace {
   type: string;

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const BASE_URL = process.env["PLAYWRIGHT_BASE_URL"] ?? "http://localhost:3000";
-const EVIDENCE_DIR = "./docs/ui-test-evidence";
+const EVIDENCE_DIR = path.resolve(__dirname, "../../../docs/ui-test-evidence");
 
 // A helper to calculate relative luminance of an RGB/RGBA string
 function getLuminance(r: number, g: number, b: number): number {

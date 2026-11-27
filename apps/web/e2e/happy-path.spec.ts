@@ -25,6 +25,9 @@
 
 import { test, expect } from "@playwright/test";
 import { execSync } from "node:child_process";
+import path from "node:path";
+
+const COMPOSE_FILE = path.resolve(__dirname, "../../../infra/docker-compose.dev.yml");
 
 const BASE_URL = process.env["PLAYWRIGHT_BASE_URL"] ?? "http://localhost:3000";
 
@@ -46,7 +49,7 @@ test.describe("Happy path — dev-bypass login to live chart", () => {
   test.beforeAll(async () => {
     try {
       execSync(
-        `docker compose -f ./infra/docker-compose.dev.yml exec -T postgres psql -U testlyn_api -d testlyn -c "DELETE FROM projects WHERE name = 'Smoke Test Project';"`
+        `docker compose -f ${COMPOSE_FILE} exec -T postgres psql -U testlyn_api -d testlyn -c "DELETE FROM projects WHERE name = 'Smoke Test Project';"`
       );
       console.log("Database cleaned up successfully: deleted existing project 'Smoke Test Project'.");
     } catch (err) {
