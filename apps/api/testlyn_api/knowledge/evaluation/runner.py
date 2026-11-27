@@ -10,6 +10,8 @@ the service and search layers commit before each network call.
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
@@ -34,6 +36,8 @@ from testlyn_api.models.org import Organization
 
 EVAL_ORG_ID = uuid.uuid5(uuid.NAMESPACE_URL, "testlyn:knowledge-evaluation-org")
 EVAL_ORG_SLUG = "knowledge-evaluation"
+# Fixed key for the session advisory lock that keeps one run at a time.
+EVAL_LOCK_KEY = 727_001_001
 MODES = ("hybrid", "vector", "keyword")
 # (result id, corpus doc id, chunk text, chunk char_start), best first.
 Ranked = tuple[str, str, str, int]
@@ -165,6 +169,27 @@ def aggregate(results: list[QueryResult]) -> dict[str, float]:
     }
 
 
+@asynccontextmanager
+async def _exclusive(engine: AsyncEngine) -> AsyncIterator[None]:
+    """Hold a session advisory lock for the whole run, on its own connection.
+
+    The lock is taken without waiting. A second run is refused and touches no
+    rows, because the refusal happens before the cleanup in the caller.
+    """
+    async with engine.connect() as conn:
+        got = await conn.scalar(select(func.pg_try_advisory_lock(EVAL_LOCK_KEY)))
+        await conn.commit()
+        if not got:
+            raise EvaluationRefused(
+                "another knowledge evaluation run is already running"
+            )
+        try:
+            yield
+        finally:
+            await conn.scalar(select(func.pg_advisory_unlock(EVAL_LOCK_KEY)))
+            await conn.commit()
+
+
 async def _count_eval_documents(engine: AsyncEngine) -> int:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
@@ -225,7 +250,7 @@ async def _ingest(
     names: dict[uuid.UUID, str] = {}
     for doc in dataset.documents:
         async with factory() as session:
-            stored, _created = await service.ingest_document(
+            stored, created = await service.ingest_document(
                 session,
                 org_id=EVAL_ORG_ID,
                 project_id=None,
@@ -238,6 +263,10 @@ async def _ingest(
                 max_chunks=INGEST_MAX_CHUNKS,
                 embed_deadline_s=INGEST_DEADLINE_S,
             )
+            if not created:
+                raise EvaluationRefused(
+                    f"document {doc.doc_id} already exists in the eval org"
+                )
             rows = await session.execute(
                 select(KnowledgeChunk.id, KnowledgeChunk.ordinal).where(
                     KnowledgeChunk.document_id == stored.id
@@ -361,6 +390,28 @@ async def run_evaluation(
     modes: tuple[str, ...] = MODES,
     judge: JudgeModel | None = None,
     judge_concurrency: int = DEFAULT_JUDGE_CONCURRENCY,
+) -> EvalReport:
+    async with _exclusive(engine):
+        return await _run_locked(
+            engine,
+            dataset=dataset,
+            embedder=embedder,
+            top_k=top_k,
+            modes=modes,
+            judge=judge,
+            judge_concurrency=judge_concurrency,
+        )
+
+
+async def _run_locked(
+    engine: AsyncEngine,
+    *,
+    dataset: EvalSet,
+    embedder: Embedder,
+    top_k: int,
+    modes: tuple[str, ...],
+    judge: JudgeModel | None,
+    judge_concurrency: int,
 ) -> EvalReport:
     if await _count_eval_documents(engine):
         raise EvaluationRefused(

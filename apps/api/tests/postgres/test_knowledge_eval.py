@@ -10,12 +10,17 @@ import uuid
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from typing import Any
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from testlyn_api.knowledge import service
 from testlyn_api.knowledge.embeddings import EmbeddingError, HashingEmbedder
 from testlyn_api.knowledge.evaluation.dataset import EvalSet, load_eval_set
+from testlyn_api.knowledge.evaluation import runner
 from testlyn_api.knowledge.evaluation.runner import (
+    EVAL_LOCK_KEY,
     EVAL_ORG_ID,
     EvaluationRefused,
     run_evaluation,
@@ -229,3 +234,96 @@ async def test_each_query_chunk_pair_is_judged_once_per_run(
         for item in q.ranking
     }
     assert judge.calls == len(pairs)
+
+
+async def _seed_document(engine: AsyncEngine, org_id: uuid.UUID, title: str) -> None:
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        if await s.get(Organization, org_id) is None:
+            s.add(
+                Organization(
+                    id=org_id,
+                    name=f"org {title}",
+                    slug=f"s-{uuid.uuid4().hex[:10]}",
+                    plan="free",
+                )
+            )
+            await s.flush()
+        s.add(
+            KnowledgeDocument(
+                org_id=org_id,
+                title=title,
+                source="upload",
+                content_sha256=uuid.uuid4().hex + uuid.uuid4().hex,
+                status="ready",
+                chunk_count=0,
+            )
+        )
+        await s.commit()
+
+
+async def test_second_run_is_refused_while_first_holds_the_lock(
+    engine: AsyncEngine, migrated: None
+) -> None:
+    async with engine.connect() as holder:
+        got = await holder.scalar(select(func.pg_try_advisory_lock(EVAL_LOCK_KEY)))
+        assert got is True
+        await _seed_document(engine, EVAL_ORG_ID, "first run's row")
+        with pytest.raises(EvaluationRefused, match="already running"):
+            await run_evaluation(engine, dataset=_dataset(), embedder=HashingEmbedder())
+        assert await _doc_count(engine) == 1
+        await holder.scalar(select(func.pg_advisory_unlock(EVAL_LOCK_KEY)))
+    # Cleanup of the seeded row, which this test created.
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        await s.execute(
+            delete(KnowledgeDocument).where(KnowledgeDocument.org_id == EVAL_ORG_ID)
+        )
+        await s.commit()
+
+
+async def test_lock_is_released_after_a_run(engine: AsyncEngine, migrated: None) -> None:
+    await run_evaluation(engine, dataset=_dataset(), embedder=HashingEmbedder())
+    async with engine.connect() as probe:
+        got = await probe.scalar(select(func.pg_try_advisory_lock(EVAL_LOCK_KEY)))
+        assert got is True
+        await probe.scalar(select(func.pg_advisory_unlock(EVAL_LOCK_KEY)))
+
+
+async def test_run_refuses_when_a_document_is_not_newly_created(
+    engine: AsyncEngine, migrated: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_ingest = service.ingest_document
+
+    async def existing(*args: Any, **kwargs: Any) -> Any:
+        stored, _created = await real_ingest(*args, **kwargs)
+        return stored, False
+
+    monkeypatch.setattr(runner.service, "ingest_document", existing)
+    with pytest.raises(EvaluationRefused, match="already exists"):
+        await run_evaluation(engine, dataset=_dataset(), embedder=HashingEmbedder())
+    assert await _doc_count(engine) == 0
+
+
+async def test_other_org_rows_are_unchanged_by_a_run(
+    engine: AsyncEngine, migrated: None
+) -> None:
+    other = uuid.uuid4()
+    await _seed_document(engine, other, "customer document")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def snapshot() -> list[tuple[str, str, int]]:
+        async with factory() as s:
+            rows = await s.execute(
+                select(
+                    KnowledgeDocument.id,
+                    KnowledgeDocument.title,
+                    KnowledgeDocument.chunk_count,
+                ).where(KnowledgeDocument.org_id == other)
+            )
+            return sorted((str(i), t, c) for i, t, c in rows.all())
+
+    before = await snapshot()
+    await run_evaluation(engine, dataset=_dataset(), embedder=HashingEmbedder())
+    assert await snapshot() == before
+    assert len(before) == 1
