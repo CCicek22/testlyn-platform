@@ -4,6 +4,7 @@ from testlyn_api.models.api_key import ApiKey
 from testlyn_api.models.audit_log import AuditLog
 from testlyn_api.models.audit_siem_sink import AuditSiemSink
 from testlyn_api.models.feature_flag import FeatureFlag
+from testlyn_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from testlyn_api.models.org import Organization, OrgMember
 from testlyn_api.models.org_ip_allowlist import OrgIpAllowlist
 from testlyn_api.models.plugin import Plugin
@@ -24,6 +25,8 @@ __all__ = [
     "AuditLog",
     "AuditSiemSink",
     "FeatureFlag",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
     "OrgIpAllowlist",
     "OrgMember",
     "Organization",
