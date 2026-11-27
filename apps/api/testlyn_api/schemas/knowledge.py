@@ -64,7 +64,7 @@ class KnowledgeDocumentDetail(KnowledgeDocumentOut):
 
 
 class KnowledgeSearchRequest(BaseModel):
-    query: str
+    query: str = Field(max_length=4000)
     project_id: uuid.UUID | None = None
     top_k: int = Field(default=5, ge=1, le=20)
     mode: Literal["hybrid", "vector", "keyword"] = "hybrid"

@@ -260,7 +260,7 @@ async def search_knowledge(
             top_k=body.top_k,
             embedder=embedder,
             reranker=reranker,
-            embed_deadline_s=settings.knowledge_embedding_deadline_seconds,
+            embed_deadline_s=settings.knowledge_search_embedding_deadline_seconds,
             rerank_deadline_s=settings.knowledge_reranker_deadline_seconds,
         )
     except EmbeddingError as exc:

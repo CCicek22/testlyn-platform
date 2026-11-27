@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 import httpx
 from httpx import AsyncClient
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from testlyn_api.config import Settings
 from testlyn_api.knowledge import routes as knowledge_routes
@@ -32,23 +32,35 @@ SEARCH_URL = "/v1/orgs/{org_id}/knowledge/search"
 
 
 class _Recorder:
-    """Stands in for both legs; records calls and returns canned hits."""
+    """Stands in for both legs; records calls and returns canned hits.
+
+    Each leg runs a trivial statement so a transaction is really open when it
+    returns, like the real SQL legs. The transaction probes in the reranker are
+    only meaningful with that: only run_search's commit can close it.
+    """
 
     def __init__(self, vector: list[search.Hit], keyword: list[search.Hit]) -> None:
         self.vector = vector
         self.keyword = keyword
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.left_transaction_open: list[bool] = []
+
+    async def _touch(self, session: AsyncSession) -> None:
+        await session.execute(select(1))
+        self.left_transaction_open.append(session.in_transaction())
 
     async def vector_candidates(
         self, session: AsyncSession, **kwargs: Any
     ) -> list[search.Hit]:
         self.calls.append(("vector", kwargs))
+        await self._touch(session)
         return list(self.vector)
 
     async def keyword_candidates(
         self, session: AsyncSession, **kwargs: Any
     ) -> list[search.Hit]:
         self.calls.append(("keyword", kwargs))
+        await self._touch(session)
         return list(self.keyword)
 
 
@@ -365,7 +377,8 @@ async def test_no_transaction_is_open_during_embedding_or_reranking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     org_id = await _create_org(client, "Probe Org")
-    _install_legs(monkeypatch, _Recorder([_hit("A"), _hit("B")], []))
+    recorder = _Recorder([_hit("A"), _hit("B")], [])
+    _install_legs(monkeypatch, recorder)
     embedder = _FakeEmbedder(db_session)
     reranker = _FakeReranker(db_session=db_session)
     app.dependency_overrides[get_embedder] = lambda: embedder
@@ -374,6 +387,8 @@ async def test_no_transaction_is_open_during_embedding_or_reranking(
     resp = await _post_search(client, org_id)
 
     assert resp.status_code == 200
+    # The legs really left a transaction open, so the probes below test run_search.
+    assert recorder.left_transaction_open == [True, True]
     assert embedder.in_transaction is False
     assert reranker.calls == 1
     assert reranker.in_transaction is False
@@ -479,7 +494,7 @@ async def test_embedder_deadline_is_503(
     monkeypatch.setattr(
         knowledge_routes,
         "get_settings",
-        lambda: Settings(knowledge_embedding_deadline_seconds=0.01),
+        lambda: Settings(knowledge_search_embedding_deadline_seconds=0.01),
     )
     app.dependency_overrides[get_embedder] = lambda: _Slow()
 
@@ -538,3 +553,25 @@ async def test_reranker_bad_reply_falls_back_to_fused_order(
     assert resp.status_code == 200
     assert resp.json()["reranked"] is False
     assert [r["document_title"] for r in resp.json()["results"]] == ["one", "two"]
+
+
+def test_search_has_its_own_deadlines_below_the_chat_upstream_timeout() -> None:
+    settings = Settings()
+
+    assert settings.knowledge_search_embedding_deadline_seconds == 10.0
+    assert (
+        settings.knowledge_search_embedding_deadline_seconds
+        + settings.knowledge_reranker_deadline_seconds
+        < settings.chat_upstream_timeout_s
+    )
+
+
+async def test_query_padded_past_the_raw_cap_is_422(client: AsyncClient) -> None:
+    org_id = await _create_org(client, "Raw Cap Org")
+
+    # Raw length 4004 exceeds the 4000 pre-trim cap; trimmed length is 1, so
+    # only the raw cap (not the 1000-char post-trim rule) can reject it.
+    resp = await _post_search(client, org_id, query=" " * 4003 + "a")
+
+    assert resp.status_code == 422
+    assert "at most 4000" in str(resp.json()["detail"])
