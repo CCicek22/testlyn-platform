@@ -171,12 +171,17 @@ def build_vector_statement(
     query_vector: list[float],
     limit: int,
 ):  # type: ignore[no-untyped-def]
-    """ORDER BY cosine distance so the HNSW index serves the query."""
+    """ORDER BY cosine distance so the HNSW index serves the query.
+
+    Chunk id breaks distance ties. The planner keeps the index scan and adds an
+    incremental sort, so equal-distance chunks come back in the same order on
+    every run.
+    """
     distance = KnowledgeChunk.embedding.cosine_distance(query_vector)
     return (
         _base_select(org_id, project_id)
         .where(KnowledgeChunk.embedding_model == model_name)
-        .order_by(distance)
+        .order_by(distance, KnowledgeChunk.id)
         .limit(limit)
     )
 

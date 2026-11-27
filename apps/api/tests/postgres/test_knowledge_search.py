@@ -265,6 +265,35 @@ async def test_filtered_hnsw_returns_own_org_chunks_behind_closer_foreign_ones(
     assert {r.document_title for r in outcome.results} == {"A doc"}
 
 
+async def test_equal_distance_chunks_come_back_in_chunk_id_order(
+    forced_hnsw_session: AsyncSession,
+) -> None:
+    """Ties in distance are broken by chunk id, so the leg is repeatable.
+
+    Forty chunks share one vector. Without the tie-break the index returns
+    them in graph order, which differs between builds.
+    """
+    org_id = await _org(forced_hnsw_session)
+    await _doc_with_vectors(
+        forced_hnsw_session, org_id, title="Ties", vectors=[_e(0)] * 40
+    )
+    rows = await forced_hnsw_session.execute(
+        select(KnowledgeChunk.id).where(KnowledgeChunk.org_id == org_id)
+    )
+    expected = sorted(rows.scalars().all())[:20]
+
+    hits = await search.vector_candidates(
+        forced_hnsw_session,
+        org_id=org_id,
+        project_id=None,
+        model_name=MODEL,
+        query_vector=_e(0),
+        limit=20,
+    )
+
+    assert [hit.chunk_id for hit in hits] == expected
+
+
 async def test_project_scoped_hnsw_skips_sibling_project_and_foreign_org_chunks(
     forced_hnsw_session: AsyncSession,
 ) -> None:
