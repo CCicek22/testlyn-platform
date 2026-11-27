@@ -31,8 +31,14 @@ _EmbeddingType = Vector(KNOWLEDGE_EMBEDDING_DIM).with_variant(JSON(), "sqlite")
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (
+        # project_id NULL (org-wide) is treated as equal to NULL, so the same
+        # text cannot be stored twice org-wide.
         UniqueConstraint(
-            "org_id", "content_sha256", name="uq_knowledge_documents_org_sha"
+            "org_id",
+            "project_id",
+            "content_sha256",
+            name="uq_knowledge_documents_org_project_sha",
+            postgresql_nulls_not_distinct=True,
         ),
     )
 

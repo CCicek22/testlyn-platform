@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from testlyn_api.models.knowledge import (
     KNOWLEDGE_EMBEDDING_DIM,
@@ -86,7 +86,7 @@ async def test_knowledge_indexes_exist(session: AsyncSession) -> None:
     assert "vector_cosine_ops" in defs["ix_knowledge_chunks_embedding_hnsw"]
     assert "gin" in defs["ix_knowledge_chunks_text_tsv"]
     assert "uq_knowledge_chunks_document_ordinal" in defs
-    assert "uq_knowledge_documents_org_sha" in {
+    assert "uq_knowledge_documents_org_project_sha" in {
         name
         for (name,) in (
             await session.execute(
@@ -172,3 +172,65 @@ async def test_downgrade_then_upgrade_round_trip(
             "knowledge_chunks",
             "knowledge_documents",
         ]
+
+
+async def test_duplicate_null_project_document_is_rejected(
+    session: AsyncSession,
+) -> None:
+    # NULLS NOT DISTINCT: two org-level documents with the same text collide.
+    org_id, _ = await _seed_document(session)
+    sha = "ab" * 32
+    session.add(
+        KnowledgeDocument(
+            org_id=org_id,
+            project_id=None,
+            title="first",
+            source="upload",
+            content_sha256=sha,
+            status="ready",
+            chunk_count=0,
+        )
+    )
+    await session.commit()
+    session.add(
+        KnowledgeDocument(
+            org_id=org_id,
+            project_id=None,
+            title="second",
+            source="upload",
+            content_sha256=sha,
+            status="ready",
+            chunk_count=0,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await session.commit()
+    await session.rollback()
+
+
+async def test_unique_constraint_is_nulls_not_distinct(session: AsyncSession) -> None:
+    row = await session.execute(
+        text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conname = 'uq_knowledge_documents_org_project_sha'"
+        )
+    )
+    assert "NULLS NOT DISTINCT" in row.scalar_one()
+
+
+async def test_nul_byte_in_title_is_rejected_by_database(session: AsyncSession) -> None:
+    # Postgres text cannot hold NUL; the server rejects the insert.
+    org_id, _ = await _seed_document(session)
+    session.add(
+        KnowledgeDocument(
+            org_id=org_id,
+            title="bad\x00title",
+            source="upload",
+            content_sha256="cd" * 32,
+            status="ready",
+            chunk_count=0,
+        )
+    )
+    with pytest.raises(DBAPIError, match="0x00"):
+        await session.commit()
+    await session.rollback()

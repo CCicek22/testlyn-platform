@@ -8,7 +8,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://testlyn:testlyn@localhost:5432/testlyn"
@@ -58,7 +60,11 @@ class Settings(BaseSettings):
 
     @property
     def bootstrap_admin_emails(self) -> list[str]:
-        return [e.strip().lower() for e in self.bootstrap_admin_emails_raw.split(",") if e.strip()]
+        return [
+            e.strip().lower()
+            for e in self.bootstrap_admin_emails_raw.split(",")
+            if e.strip()
+        ]
 
     # --- Mode ---
     run_mode: str = "cloud"  # 'cloud' | 'docker'
@@ -149,6 +155,8 @@ class Settings(BaseSettings):
     knowledge_embedding_timeout_s: float = 30.0
     knowledge_embedding_batch_size: int = 32
     knowledge_max_document_chars: int = 500_000
+    knowledge_max_chunks: int = 2000
+    knowledge_embedding_deadline_seconds: float = 120.0
 
     # --- Stripe ---
     stripe_secret_key: str = "sk_test_PLACEHOLDER"
@@ -180,8 +188,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _knowledge_embedder_needs_url(self) -> Settings:
-        if self.knowledge_embedding_provider == "openai_compat" and not self.knowledge_embedding_base_url:
-            raise ValueError("knowledge_embedding_base_url is required when provider is openai_compat")
+        if (
+            self.knowledge_embedding_provider == "openai_compat"
+            and not self.knowledge_embedding_base_url
+        ):
+            raise ValueError(
+                "knowledge_embedding_base_url is required when provider is openai_compat"
+            )
         return self
 
     @model_validator(mode="after")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 
@@ -11,14 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from testlyn_api.knowledge.chunking import chunk_markdown
-from testlyn_api.knowledge.embeddings import Embedder
+from testlyn_api.knowledge.embeddings import Embedder, EmbeddingError
 from testlyn_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
 
 STATUS_READY = "ready"
 
 
 class KnowledgeInputError(ValueError):
-    """Rejected input (empty, too large, or no chunkable content)."""
+    """Rejected input (empty, too large, or too many chunks)."""
 
 
 async def ingest_document(
@@ -32,12 +33,18 @@ async def ingest_document(
     created_by: uuid.UUID | None,
     embedder: Embedder,
     max_chars: int,
+    max_chunks: int,
+    embed_deadline_s: float | None,
 ) -> tuple[KnowledgeDocument, bool]:
     """Store a document and its embedded chunks.
 
-    Returns ``(document, created)``. Identical text in the same org is a no-op
-    and returns the existing document with ``created=False``. Embedding runs
-    before any write, so a failing embedder leaves nothing behind.
+    Returns ``(document, created)``. Identical text in the same org and project
+    is a no-op and returns the existing document with ``created=False``.
+
+    Embedding runs with no database transaction open, so a slow embedder does
+    not pin a pooled connection. It also runs before any write, so a failing or
+    timed-out embedder leaves nothing behind. Raises ``EmbeddingError`` when the
+    embedder fails or exceeds ``embed_deadline_s``.
     """
     if not text.strip():
         raise KnowledgeInputError("text must not be empty")
@@ -45,15 +52,24 @@ async def ingest_document(
         raise KnowledgeInputError(f"text exceeds {max_chars} characters")
 
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    existing = await _find_by_sha(session, org_id, digest)
+    existing = await _find_existing(session, org_id, project_id, digest)
     if existing is not None:
         return existing, False
 
     chunks = chunk_markdown(text)
     if not chunks:
         raise KnowledgeInputError("text has no content to index")
+    if len(chunks) > max_chunks:
+        raise KnowledgeInputError(f"text would produce more than {max_chunks} chunks")
 
-    vectors = await embedder.embed([chunk.text for chunk in chunks])
+    # End the read transaction so the connection returns to the pool before the
+    # slow embedding call. Nothing loaded above is used after this point.
+    await session.commit()
+    try:
+        async with asyncio.timeout(embed_deadline_s):
+            vectors = await embedder.embed([chunk.text for chunk in chunks])
+    except TimeoutError as exc:
+        raise EmbeddingError("embedding deadline exceeded") from exc
 
     document = KnowledgeDocument(
         org_id=org_id,
@@ -87,7 +103,7 @@ async def ingest_document(
     except IntegrityError:
         # A concurrent request stored the same text between our lookup and insert.
         await session.rollback()
-        winner = await _find_by_sha(session, org_id, digest)
+        winner = await _find_existing(session, org_id, project_id, digest)
         if winner is None:
             raise
         return winner, False
@@ -131,38 +147,45 @@ async def get_document(
 
 
 async def list_chunks(
-    session: AsyncSession, *, org_id: uuid.UUID, document_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    document_id: uuid.UUID,
+    limit: int,
+    offset: int,
 ) -> list[KnowledgeChunk]:
-    """Chunks of one document, ordered, without loading the embedding column."""
+    """One page of a document's chunks, ordered, without the embedding column."""
     result = await session.execute(
         select(KnowledgeChunk)
         .options(defer(KnowledgeChunk.embedding))
         .where(
-            KnowledgeChunk.org_id == org_id, KnowledgeChunk.document_id == document_id
+            KnowledgeChunk.org_id == org_id,
+            KnowledgeChunk.document_id == document_id,
         )
         .order_by(KnowledgeChunk.ordinal)
+        .limit(limit)
+        .offset(offset)
     )
     return list(result.scalars().all())
 
 
-async def delete_document(
-    session: AsyncSession, *, org_id: uuid.UUID, document_id: uuid.UUID
-) -> bool:
+async def delete_document(session: AsyncSession, document: KnowledgeDocument) -> None:
     """Delete a document; its chunks go with it via ON DELETE CASCADE."""
-    document = await get_document(session, org_id=org_id, document_id=document_id)
-    if document is None:
-        return False
     await session.delete(document)
     await session.commit()
-    return True
 
 
-async def _find_by_sha(
-    session: AsyncSession, org_id: uuid.UUID, digest: str
+async def _find_existing(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    digest: str,
 ) -> KnowledgeDocument | None:
+    # is_not_distinct_from: a NULL project matches only a NULL project.
     result = await session.execute(
         select(KnowledgeDocument).where(
             KnowledgeDocument.org_id == org_id,
+            KnowledgeDocument.project_id.is_not_distinct_from(project_id),
             KnowledgeDocument.content_sha256 == digest,
         )
     )
