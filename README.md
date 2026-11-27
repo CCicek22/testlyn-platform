@@ -75,7 +75,7 @@ The dev compose Postgres is PostgreSQL 18 with pgvector. Its volume mounts at `/
 
 ### Searching
 
-`POST /v1/orgs/{org_id}/knowledge/search` takes `query` (1 to 1000 characters after trimming), optional `project_id`, `top_k` (1 to 20, default 5), and `mode`:
+`POST /v1/orgs/{org_id}/knowledge/search` takes `query` (at most 4000 characters before trimming, 1 to 1000 after), optional `project_id`, `top_k` (1 to 20, default 5), and `mode`:
 
 - `hybrid` (default): nearest chunks by cosine distance on the HNSW index, plus Postgres full-text matches (`websearch_to_tsquery` with `ts_rank_cd`). The two lists are fused with Reciprocal Rank Fusion (k = 60). Each leg fetches `min(max(4 * top_k, 20), 100)` candidates.
 - `vector`: the embedding leg only.
@@ -85,9 +85,11 @@ Scope: with `project_id`, results come from that project and from org-wide docum
 
 Each result is a citation: `chunk_id`, `document_id`, `document_title`, `source`, `heading`, `text`, `char_start`, `char_end`, `score`, `vector_rank`, and `keyword_rank`. A rank is `null` when that leg did not return the chunk. The response is `{results, mode, reranked}`. `score` is the fused RRF score, or the reranker's score when `reranked` is `true`.
 
-Filters apply after the HNSW index is scanned, so a query can return fewer rows than it asks for. The search enables pgvector iterative scans for each vector query (`hnsw.iterative_scan = strict_order`, `hnsw.ef_search = 2 * candidates`). This needs pgvector 0.8.0 or later. Scans stop after `hnsw.max_scan_tuples` (default 20000), so a tenant whose chunks are a small share of the index and sit far from the query can still get short results. See ADR-012.
+Filters apply after the HNSW index is scanned, so a query can return fewer rows than it asks for. The search enables pgvector iterative scans for each vector query (`hnsw.iterative_scan = strict_order`, `hnsw.ef_search = min(max(40, 2 * candidates), 1000)`). This needs pgvector 0.8.0 or later. Scans stop after `hnsw.max_scan_tuples` (default 20000), so a tenant whose chunks are a small share of the index and sit far from the query can still get short results. See ADR-012.
 
-Embedder failure or timeout returns 503 with a generic message. Embedding and reranking run with no database transaction open.
+Query embedding has its own deadline, `KNOWLEDGE_SEARCH_EMBEDDING_DEADLINE_SECONDS` (default 10), separate from the ingest deadline. Embedder failure or timeout returns 503 with a generic message. Embedding and reranking run with no database transaction open. Both deadlines together stay below `CHAT_UPSTREAM_TIMEOUT_S` (default 30).
+
+Residual risk: search passages are untrusted. Documents can contain text that reads like instructions. The chat tool returns passages as quoted data with a notice, and the reports agent cannot transfer control, but a model can still be steered by passage text. Confirmation before state-changing tools is not implemented yet and is a follow-up. See ADR-012.
 
 #### Reranker (optional, off by default)
 
@@ -98,7 +100,7 @@ KNOWLEDGE_RERANKER_URL=http://localhost:8081/v1/rerank
 KNOWLEDGE_RERANKER_MODEL=your-rerank-model
 ```
 
-Up to 100 fused candidates are sent for reranking. If the call fails, times out, or returns an invalid body (wrong count, bad or duplicate index, non-finite score), the fused order is returned with `reranked: false` and a warning is logged.
+At most 80 fused candidates are sent for reranking (`top_k` is capped at 20, so the pool is at most `min(max(4 * 20, 20), 100)` = 80). The reranker must return at least `top_n` results and no more than the documents sent; extra results are cut to the best `top_n`. If the call fails, times out, or returns an invalid body (too few results, bad or duplicate index, bool or non-finite score, oversized response over 1 MB), the fused order is returned with `reranked: false` and a warning is logged.
 
 `CREATE EXTENSION vector` needs superuser. Migration 0015 runs it, so the migration role must either be a superuser or find the extension already installed. An admin can pre-create it with `CREATE EXTENSION vector;` in the target database. The `IF NOT EXISTS` clause then makes the migration a no-op.
 
