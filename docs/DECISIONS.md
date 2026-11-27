@@ -96,7 +96,7 @@ Format:
 **Status:** accepted
 **Context:** Knowledge search has to find exact rare terms (identifiers, error codes) that embeddings miss, and also match paraphrases that keyword search misses. Results are tenant-scoped, and a search must never return another org's chunks. The HNSW index is searched before `WHERE` filters apply, so a filter can return fewer rows than `LIMIT`.
 **Decision:**
-- Hybrid by default: a vector leg (cosine on the HNSW index, same embedding model only) and a keyword leg (`websearch_to_tsquery` on the generated `text_tsv`, ranked by `ts_rank_cd`). Results are fused with Reciprocal Rank Fusion, `score = sum(1 / (60 + rank))`, with ties broken by chunk id. RRF needs no score calibration between legs.
+- Hybrid by default: a vector leg (cosine on the HNSW index, same embedding model only) and a keyword leg (any-term match on the generated `text_tsv`, ranked by `ts_rank_cd`; see ADR-014). Results are fused with Reciprocal Rank Fusion, `score = sum(1 / (60 + rank))`, with ties broken by chunk id. RRF needs no score calibration between legs.
 - Each leg fetches `min(max(4 * top_k, 20), 100)` candidates. `top_k` is at most 20, so that is at most 80 per leg and at most 80 fused candidates sent to the reranker. `vector` and `keyword` modes run one leg. `keyword` mode never calls the embedder.
 - Query embedding has its own deadline (`KNOWLEDGE_SEARCH_EMBEDDING_DEADLINE_SECONDS`, default 10), separate from ingest. Reranker deadline defaults to 10. Their sum stays below `CHAT_UPSTREAM_TIMEOUT_S` (30).
 - Reranker responses must return at least `top_n` and at most the number of documents sent; extra results are cut to the best `top_n`. Fewer than `top_n` is an error that falls back to the fused order.
@@ -122,9 +122,58 @@ Format:
 - Judge output is untrusted. Passages sit in per-call tagged data blocks. Replies must be one JSON object with exact keys and types, bounded in length. Any failure, timeout or client error is recorded per item as `judge_error` and is never a pass.
 **Consequences:**
 - The hashing gate tests the pipeline (chunking, ingest, legs, fusion, metrics), not embedding quality. Its numbers say nothing about a real model.
-- Keyword mode returned no rows for 40 of 48 queries. `websearch_to_tsquery` ANDs the query terms, so a natural-language question matches only chunks that contain every non-stopword. The harness reports this as measured. The gate does not assume keyword beats vector on keyword queries, because it does not in this run (0.438 vs 0.500 hit@5 on `kind=keyword`). Whether to add an OR-style keyword leg is a separate decision.
+- **UPDATE (2026-11-27):** Keyword mode returned no rows for 40 of 48 queries under the AND keyword leg (`websearch_to_tsquery`). The OR-style leg is decided in ADR-014. The gate does not assume keyword beats vector on keyword queries.
 - The judge is a secondary signal with real limits. Span gold counts any chunk containing the answer span as relevant, even when the surrounding text would not answer the question. A judge can disagree with that for good reasons, so agreement is evidence about both sides, not a score. Tagged blocks make injection harder, but do not stop a model from following text inside a passage. The judge makes paid model calls, so it is only run on request.
 - No judge numbers are published yet. No run used a real model. The Vertex adapter is tested against a stub SDK only.
 - A session advisory lock serializes runs. A second run is refused before it touches rows.
 - Changing the query set or corpus means re-measuring and updating the gate thresholds in the same change. The current measurements are in `README.md`.
 **Alternatives considered:** Chunk-id labels (rejected: break when the chunker changes). Model-generated questions (rejected for now: needs a paid model and makes the gold set non-reproducible). A third-party evaluation framework (rejected: a new dependency and a paid judge path by default, for a gate that needs neither). Judging the whole corpus instead of the top 5 (rejected: cost grows with corpus size and the search output is what users see).
+
+## ADR-014: Keyword leg matches any term, ranked by ts_rank_cd — 2026-11-27
+**Status:** accepted
+**Context:** `websearch_to_tsquery` ANDs every non-stopword. Keyword mode returned no rows for 40 of 48 gold queries (natural-language questions), so keyword-only hit@5 was 0.167 on the hashing embedder. The hybrid row hid this because the vector leg still filled the list. The eval harness (ADR-013) makes the change measurable.
+**Decision:**
+- Keyword leg: `cast(func.plainto_tsquery(lang, query), Text)` with every ` & ` replaced by ` | `, cast back to `TSQUERY`. `plainto_tsquery` emits quoted lexemes joined only by ` & `; a lexeme never contains a space, so the replace touches separators only. Verified on Postgres 18.7 (see the probe list below).
+- Ranking stays `ts_rank_cd(text_tsv, query)`. Stopword-only and punctuation-only queries return no keyword rows, with a NOTICE from Postgres, and do not raise.
+- Syntax is no longer honored: quotes (`"gate timeout"`), `-term`, `or`, `|`, `&`, `:*`. Pinned by tests in `tests/postgres/test_knowledge_search.py`.
+- Ranking normalisation is not changed. `ts_rank_cd(..., 32)` is a monotonic map of the rank, so it cannot change any order and was not measured as a separate variant. Length normalisation (flag 1) was measured and not shipped (below).
+
+**Measured (top 5, 48 queries, hybrid overall; keyword-only hit@5 in the last column; each row run twice with identical JSON):**
+
+| embedder | variant | hybrid hit@5 | hybrid recall@5 | hybrid MRR | hybrid nDCG@5 | keyword-only hit@5 |
+|---|---|---:|---:|---:|---:|---:|
+| hashing | AND (before) | 0.604 | 0.604 | 0.448 | 0.486 | 0.167 |
+| hashing | any-term (shipped) | 0.812 | 0.812 | 0.598 | 0.649 | 0.896 |
+| hashing | any-term + length norm (flag 1) | 0.812 | 0.812 | 0.612 | 0.660 | 0.875 |
+| EmbeddingGemma | AND (before) | 0.917 | 0.906 | 0.790 | 0.815 | 0.167 |
+| EmbeddingGemma | any-term (shipped) | 0.896 | 0.896 | 0.832 | 0.845 | 0.896 |
+| EmbeddingGemma | any-term + length norm (flag 1) | 0.896 | 0.896 | 0.814 | 0.832 | 0.875 |
+
+Hybrid paraphrase (16 queries): hashing 0.188 (AND) to 0.562 (shipped); EmbeddingGemma 0.812 (AND) to 0.688 (shipped and flag 1). Hybrid keyword kind on hashing: 0.750 to 0.938.
+
+**Why this variant:** On the real embedder, shipped any-term beats AND on MRR (+0.042) and nDCG@5 (+0.030). It loses one query on hit@5 (1/48 = 0.021) and two on paraphrase hit@5 (2/16 = 0.125). Length normalisation lowers EmbeddingGemma MRR and nDCG and gains only 0.012 nDCG on hashing, so it is not shipped.
+
+**Trade-off to note:** On hashing, keyword-only (0.896) now beats hybrid (0.812). The weak hashing vector leg dilutes RRF. The hybrid-versus-best-leg gate bound is widened to match (see Consequences).
+
+**Consequences:**
+- Gate thresholds (`tests/postgres/test_knowledge_eval.py`, hashing embedder, new measured values in brackets): hybrid overall hit@5 at least 37/48 = 0.771 (39/48; 2 queries of slack); hybrid overall nDCG@5 at least 0.607 (0.649 minus 2/48 = 0.042); hybrid keyword-kind hit@5 at least 14/16 = 0.875 (15/16; 1 query of slack); hybrid mixed-kind at least 14/16 (15/16). Hybrid vs best single leg: at least `0.896 - 0.10 = 0.796` (measured 0.812; keyword-only 43/48). The bound was 0.05 and is now 0.10 because keyword-only leads hybrid by 4 queries (0.083). This loosens a gate to match a measured trade-off; it is a decision to review, not a quality claim.
+- Keyword-only on `kind=keyword` is 16/16 on both embedders, so its gate rows are not the regression risk. The risk is hybrid falling behind keyword on hashing, which is now a known 4-query gap.
+- Users can no longer write phrase, exclusion or OR syntax in keyword mode. Those queries are read as plain words. This is a visible change for any caller that relied on websearch syntax; no caller in this repo did.
+- Hashing numbers test the pipeline only. The EmbeddingGemma numbers are the ones to read for quality, and they show a one-query drop on hit@5 against the AND leg.
+
+**Alternatives considered:**
+- Keep AND (rejected: keyword-only hit@5 0.167 and hybrid hashing 0.604).
+- Structural per-word `plainto_tsquery` combined with `||` (not shipped: it splits hyphenated and dotted words into AND groups, so `well-known` would need all its parts, unlike the replace. It is a different query and was not measured. The replace is safe because plainto never emits a space inside a lexeme).
+- `websearch_to_tsquery` with `or` between words (rejected: it needs the caller to write `or`, and `or` inside the text is ANDed with the rest).
+- Length normalisation, flag 1 (measured, not shipped: see above).
+
+**Probe outputs on Postgres 18.7 (`docker exec ... psql -At`):**
+- `plainto_tsquery('english', 'well-known jobs & queues')` = `'well-known' & 'well' & 'known' & 'job' & 'queue'`
+- `replace(...)` of that string = `'well-known' | 'well' | 'known' | 'job' | 'queue'`
+- `plainto_tsquery('english', 'the and of')` = empty (NOTICE: contains only stop words)
+- `plainto_tsquery('english', '!!! ...')` = empty (NOTICE)
+- `plainto_tsquery('english', 'foo | bar')` = `'foo' & 'bar'`
+- `plainto_tsquery('english', 'a:b *c d<->e (x) !y')` = `'b' & 'c' & 'd' & 'e' & 'x' & 'y'`
+- `plainto_tsquery('english', 'quote'' & ''z')` = `'quot' & 'z'`
+- `plainto_tsquery('english', 'gate.db_pool_size GATE_UPSTREAM_TIMEOUT 504 HMAC-SHA256 Retry-After')` = `'gate.db' & 'pool' & 'size' & 'gate' & 'upstream' & 'timeout' & '504' & 'hmac-sha256' & 'hmac' & 'sha256' & 'retry-aft' & 'retri'`
+
