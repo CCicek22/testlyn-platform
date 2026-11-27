@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 import pytest
+import httpx
 from httpx import AsyncClient
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,7 @@ from testlyn_api.knowledge.embeddings import (
     HashingEmbedder,
     get_embedder,
 )
-from testlyn_api.knowledge.rerank import RerankError, get_reranker
+from testlyn_api.knowledge.rerank import HttpReranker, RerankError, get_reranker
 from testlyn_api.main import app
 from testlyn_api.models.org import OrgMember
 
@@ -483,3 +484,57 @@ async def test_embedder_deadline_is_503(
     app.dependency_overrides[get_embedder] = lambda: _Slow()
 
     assert (await _post_search(client, org_id)).status_code == 503
+
+
+def _http_reranker(handler: Any, url: str = "http://reranker.test/v1/rerank") -> Any:
+    return HttpReranker(
+        url=url,
+        model="m",
+        transport=httpx.MockTransport(handler),
+    )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "huge-score",
+        "deep-json",
+        "oversized-body",
+        "invalid-url",
+        "unexpected-exception",
+    ],
+)
+async def test_reranker_bad_reply_falls_back_to_fused_order(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    org_id = await _create_org(client, f"Rerank Bad {case}")
+    _install_legs(monkeypatch, _Recorder([_hit("one"), _hit("two")], []))
+    app.dependency_overrides[get_embedder] = lambda: HashingEmbedder()
+
+    if case == "huge-score":
+        payload = b'{"results": [{"index": 0, "relevance_score": ' + b"9" * 400 + b"}]}"
+        reranker: Any = _http_reranker(lambda r: httpx.Response(200, content=payload))
+    elif case == "deep-json":
+        payload = b'{"results": ' + b"[" * 100_000 + b"]" * 100_000 + b"}"
+        reranker = _http_reranker(lambda r: httpx.Response(200, content=payload))
+    elif case == "oversized-body":
+        payload = b'{"results": []}' + b" " * (1_048_576 + 1)
+        reranker = _http_reranker(lambda r: httpx.Response(200, content=payload))
+    elif case == "invalid-url":
+        reranker = HttpReranker(url="http://[::1", model="m")
+    else:
+
+        class _Exploding:
+            async def rerank(
+                self, query: str, documents: list[str], *, top_n: int
+            ) -> list[tuple[int, float]]:
+                raise RuntimeError("unexpected")
+
+        reranker = _Exploding()
+    app.dependency_overrides[get_reranker] = lambda: reranker
+
+    resp = await _post_search(client, org_id, top_k=2)
+
+    assert resp.status_code == 200
+    assert resp.json()["reranked"] is False
+    assert [r["document_title"] for r in resp.json()["results"]] == ["one", "two"]

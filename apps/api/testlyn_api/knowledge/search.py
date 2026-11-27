@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import REGCONFIG, TSVECTOR
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.knowledge.embeddings import Embedder, EmbeddingError
-from testlyn_api.knowledge.rerank import Reranker, RerankError
+from testlyn_api.knowledge.rerank import Reranker
 from testlyn_api.models.knowledge import KnowledgeChunk, KnowledgeDocument
 
 log = structlog.get_logger(__name__)
@@ -254,10 +254,12 @@ async def _rerank(
     deadline_s: float | None,
 ) -> list[tuple[int, float]] | None:
     """Reranked (index, score) pairs, or None to keep the fused order."""
+    # Reranking is optional, so any failure keeps the fused order. CancelledError
+    # is a BaseException and still propagates. Only the type name is logged.
     try:
         async with asyncio.timeout(deadline_s):
             return await reranker.rerank(query, documents, top_n=top_n)
-    except (TimeoutError, RerankError) as exc:
+    except Exception as exc:
         log.warning("knowledge.rerank_fallback", reason=type(exc).__name__)
         return None
 

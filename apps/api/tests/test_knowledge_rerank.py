@@ -85,6 +85,17 @@ async def test_sends_bearer_key_only_when_configured() -> None:
         b'{"results": [{"index": true, "relevance_score": 0.5}, {"index": 1, "relevance_score": 0.4}, {"index": 2, "relevance_score": 0.3}]}',
         b'{"results": [{"index": 0, "relevance_score": 0.5}]}',
         b"not json at all",
+        b'{"results": [{"index": 0, "relevance_score": '
+        + b"9" * 400
+        + b'}, {"index": 1, "relevance_score": 0.1}, {"index": 2, "relevance_score": 0.2}]}',
+        pytest.param(
+            b'{"results": [{"index": 0, "relevance_score": true}, {"index": 1, "relevance_score": 0.1}, {"index": 2, "relevance_score": 0.2}]}',
+            id="bool-score",
+        ),
+        pytest.param(
+            b'{"results": [{"index": 0, "relevance_score": "0.5"}, {"index": 1, "relevance_score": 0.1}, {"index": 2, "relevance_score": 0.2}]}',
+            id="string-score",
+        ),
     ],
 )
 async def test_malformed_responses_raise_rerank_error(content: bytes) -> None:
@@ -129,3 +140,66 @@ def test_get_reranker_builds_client_from_settings() -> None:
     built = rerank.build_reranker(settings)
 
     assert isinstance(built, HttpReranker)
+
+
+async def test_invalid_url_is_rerank_error() -> None:
+    reranker = HttpReranker(url="http://[::1", model="m")
+
+    with pytest.raises(RerankError):
+        await reranker.rerank("q", DOCS, top_n=2)
+
+
+async def test_oversized_body_is_rerank_error() -> None:
+    padding = b" " * (rerank.MAX_RESPONSE_BYTES + 1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b'{"results": []}' + padding)
+
+    with pytest.raises(RerankError, match="too large"):
+        await _reranker(handler).rerank("q", DOCS, top_n=2)
+
+
+async def test_more_results_than_top_n_keeps_the_best_expected() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 0, "relevance_score": 0.1},
+                    {"index": 1, "relevance_score": 0.9},
+                    {"index": 2, "relevance_score": 0.5},
+                ]
+            },
+        )
+
+    pairs = await _reranker(handler).rerank("q", DOCS, top_n=2)
+
+    assert pairs == [(1, 0.9), (2, 0.5)]
+
+
+async def test_more_results_than_documents_is_rerank_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 0, "relevance_score": 0.1},
+                    {"index": 1, "relevance_score": 0.9},
+                    {"index": 2, "relevance_score": 0.5},
+                    {"index": 0, "relevance_score": 0.4},
+                ]
+            },
+        )
+
+    with pytest.raises(RerankError):
+        await _reranker(handler).rerank("q", DOCS, top_n=5)
+
+
+async def test_deeply_nested_json_is_rerank_error() -> None:
+    payload = b'{"results": ' + b"[" * 100_000 + b"]" * 100_000 + b"}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=payload)
+
+    with pytest.raises(RerankError, match="malformed"):
+        await _reranker(handler).rerank("q", DOCS, top_n=2)

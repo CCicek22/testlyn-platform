@@ -8,12 +8,17 @@ off unless ``KNOWLEDGE_RERANKER_URL`` is set.
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Protocol
 
 import httpx
 
 from testlyn_api.config import Settings, get_settings
+
+
+# Largest reranker reply accepted. Our requests carry at most 100 short documents.
+MAX_RESPONSE_BYTES = 1_048_576
 
 
 class RerankError(Exception):
@@ -61,27 +66,33 @@ class HttpReranker:
             async with httpx.AsyncClient(
                 timeout=self._timeout_s, transport=self._transport
             ) as client:
-                response = await client.post(self._url, json=body, headers=headers)
-        except httpx.HTTPError as exc:
+                async with client.stream(
+                    "POST", self._url, json=body, headers=headers
+                ) as response:
+                    if response.status_code >= 400:
+                        raise RerankError(
+                            f"rerank endpoint returned HTTP {response.status_code}"
+                        )
+                    payload = await _read_capped(response)
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
             raise RerankError(f"rerank request failed: {type(exc).__name__}") from exc
-        if response.status_code >= 400:
-            raise RerankError(f"rerank endpoint returned HTTP {response.status_code}")
 
         expected = min(top_n, len(documents))
         try:
-            data = response.json()["results"]
-        except (KeyError, TypeError, ValueError) as exc:
+            data = json.loads(payload)["results"]
+        except (KeyError, TypeError, ValueError, RecursionError) as exc:
             raise RerankError("rerank response is malformed") from exc
         if not isinstance(data, list):
             raise RerankError("rerank response is malformed")
-        if len(data) != expected:
+        # Servers may return more than top_n; keep the best `expected` of them.
+        if not expected <= len(data) <= len(documents):
             raise RerankError("rerank response has the wrong number of results")
         try:
-            pairs = [(item["index"], float(item["relevance_score"])) for item in data]
-        except (KeyError, TypeError, ValueError) as exc:
+            raw = [(item["index"], item["relevance_score"]) for item in data]
+        except (KeyError, TypeError) as exc:
             raise RerankError("rerank response is malformed") from exc
 
-        indices = [index for index, _ in pairs]
+        indices = [index for index, _ in raw]
         for index in indices:
             if isinstance(index, bool) or not isinstance(index, int):
                 raise RerankError("rerank index is not an integer")
@@ -89,9 +100,33 @@ class HttpReranker:
                 raise RerankError("rerank index is out of range")
         if len(set(indices)) != len(indices):
             raise RerankError("rerank indices are not unique")
-        if not all(math.isfinite(score) for _, score in pairs):
-            raise RerankError("rerank response contains non-finite scores")
-        return sorted(pairs, key=lambda pair: (-pair[1], pair[0]))
+        pairs = [(index, _score(value)) for index, value in raw]
+        return sorted(pairs, key=lambda pair: (-pair[1], pair[0]))[:expected]
+
+
+async def _read_capped(response: httpx.Response) -> bytes:
+    """Read the body, refusing anything over MAX_RESPONSE_BYTES."""
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > MAX_RESPONSE_BYTES:
+            raise RerankError("rerank response is too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _score(value: object) -> float:
+    """A real, finite number. bool and strings are not scores."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise RerankError("rerank score is not a number")
+    try:
+        score = float(value)
+    except OverflowError as exc:
+        raise RerankError("rerank score is out of range") from exc
+    if not math.isfinite(score):
+        raise RerankError("rerank response contains non-finite scores")
+    return score
 
 
 def build_reranker(settings: Settings) -> Reranker | None:
