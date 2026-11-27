@@ -168,7 +168,7 @@ export default function MarketplacePage() {
           </Button>
           <Button size="sm" asChild>
             <a
-              href="https://github.com/CCicek22/testlyn/blob/main/packages/plugin-sdk/README.md"
+              href="https://github.com/CCicek22/testlyn-platform/blob/main/packages/plugin-sdk/README.md"
               target="_blank"
               rel="noopener noreferrer"
             >

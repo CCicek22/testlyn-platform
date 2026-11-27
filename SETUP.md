@@ -58,7 +58,7 @@ API: <http://localhost:8080>, Web: <http://localhost:3000>.
 
 ## 6. GitHub repo + CI
 
-- [ ] Push to `github.com/CCicek22/testlyn` (default branch `main`).
+- [ ] Push to `github.com/CCicek22/testlyn-platform` (default branch `main`).
 - [ ] In repo settings → secrets → add `GCP_WIF_PROVIDER`, `GCP_SA_EMAIL`, `GCP_PROJECT_ID`.
 - [ ] Cloud Build connect to GitHub repo, or use GitHub Actions workflows under `.github/workflows/`.
 

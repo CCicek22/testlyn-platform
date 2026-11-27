@@ -66,8 +66,8 @@ Format:
 
 ## ADR-008: GitHub as canonical source repo — 2026-05-12
 **Status:** accepted (supersedes implicit GitLab assumption in initial prompt)
-**Context:** Operator's git user is `CCicek22` on GitHub. Original CLAUDE.md draft referenced GitLab.
-**Decision:** GitHub `CCicek22/testlyn` is canonical. CI via GitHub Actions for app builds, Cloud Build GitHub trigger for image publish + Terraform.
+**Context:** The project is hosted under `CCicek22` on GitHub. Original CLAUDE.md draft referenced GitLab.
+**Decision:** GitHub `CCicek22/testlyn-platform` is canonical. CI via GitHub Actions for app builds, Cloud Build GitHub trigger for image publish + Terraform.
 **Consequences:** No GitLab mirror. Cloud Build connects to GitHub repo. `.github/workflows/` instead of `.gitlab/`.
 **Alternatives considered:** GitLab primary (rejected: no existing GitLab account), GitHub + GitLab mirror (rejected: maintenance overhead with zero benefit).
 

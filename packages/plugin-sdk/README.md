@@ -101,7 +101,7 @@ See `examples/sample-runner/` for a complete annotated plugin.
 
 ## Publishing to the marketplace
 
-Submit a PR to `https://github.com/CCicek22/testlyn` with your plugin under
+Submit a PR to `https://github.com/CCicek22/testlyn-platform` with your plugin under
 `packages/plugins/<your-slug>/`. Include:
 
 1. `package.json` with `"testlyn-plugin": true`
