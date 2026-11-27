@@ -52,6 +52,36 @@ Most important:
 - Phase 3: Synthetic data + security + multi-region
 - Phase 4: Mobile + RUM + RBAC + enterprise
 
+## Knowledge store
+
+Text is stored as documents, split into chunks, and each chunk gets a 256-dimension embedding in Postgres (pgvector). Documents are scoped to an org and optionally to a project. Search and ranking are not implemented yet.
+
+Endpoints, prefix `/v1/orgs/{org_id}/knowledge`:
+
+- `POST /documents` takes `title`, `source`, `text`, and optional `project_id`. Returns 201 for a new document, or 200 with the existing one when identical text is already stored in the org.
+- `GET /documents` lists newest first. Supports `limit`, `offset`, and `project_id`.
+- `GET /documents/{document_id}` returns the document and its chunks. Embeddings are not returned.
+- `DELETE /documents/{document_id}` returns 204 and removes its chunks.
+
+Choosing an embedder with `KNOWLEDGE_EMBEDDING_PROVIDER`:
+
+- `hashing` (default): offline and deterministic, for tests and CI. It matches shared words only and does not understand meaning.
+- `openai_compat`: POSTs to `{KNOWLEDGE_EMBEDDING_BASE_URL}/embeddings` in the OpenAI format. Every returned vector must have 256 dimensions, or the request fails. Requires `KNOWLEDGE_EMBEDDING_BASE_URL`.
+
+The dev compose Postgres is PostgreSQL 18 with pgvector. An existing Postgres 16 volume must be recreated (`docker compose -f infra/docker-compose.dev.yml down -v`).
+
+Postgres-only tests (skipped without `TEST_POSTGRES_URL`):
+
+```sh
+docker run -d --rm --name testlyn-pgvector-test -e POSTGRES_PASSWORD=localdev \
+  -e POSTGRES_DB=testlyn_test -p 127.0.0.1:55432:5432 pgvector/pgvector:0.8.7-pg18
+cd apps/api
+TEST_POSTGRES_URL=postgresql+asyncpg://postgres:localdev@127.0.0.1:55432/testlyn_test \
+  uv run --frozen pytest -m postgres
+```
+
+These tests drop and recreate the `public` schema of the database they point at. Use a throwaway database.
+
 ## License
 
 © 2026 Mack Cicek. All rights reserved. Source is published for review; no licence is granted.
