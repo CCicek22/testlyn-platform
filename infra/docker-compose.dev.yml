@@ -5,9 +5,10 @@ version: "3.9"
 # Stop:  docker compose -f infra/docker-compose.dev.yml down -v
 
 services:
-  # ── Postgres 16 ─────────────────────────────────────────────────────────────
+  # ── Postgres 18 + pgvector ──────────────────────────────────────────────────
+  # Existing postgres_data volumes from Postgres 16 must be recreated (down -v).
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.7-pg18
     environment:
       POSTGRES_DB: testlyn
       POSTGRES_USER: testlyn_api
