@@ -138,9 +138,9 @@ Format:
 - Statement timeout: `keyword_candidates` reads `statement_timeout`, sets it to `knowledge_search_keyword_timeout_ms` (`KNOWLEDGE_SEARCH_KEYWORD_TIMEOUT_MS`, default 3000) with `set_config(..., true)`, runs the statement, and restores the previous value. On SQLSTATE 57014 it rolls back and raises `KeywordSearchTimeout`. The route maps it to 503 `Search timed out, try a shorter query` and logs only the error type. `run_search` takes `keyword_timeout_ms` as a keyword-only argument; the eval runner passes nothing, so the harness has no timeout. The chat tool already turns a non-2xx reply into `{"ok": false, "status": 503, "error": ...}`; it returns no traceback.
 - Ranking stays `ts_rank_cd(text_tsv, query)`, flag 0. Stopword-only and punctuation-only queries return no keyword rows, with a NOTICE from Postgres, and do not raise.
 - Syntax: `or` is an English stopword and is dropped, like `the`. Quote characters, `|`, `&`, `:*` and `!` are separators and are dropped. `-` is not an exclusion operator: a leading minus is dropped from a word, but kept in numbers (`2026-11-27` gives `'2026' & '-11' & '-27'`, and the any-term form joins those with `|`). Pinned by tests in `tests/postgres/test_knowledge_search.py`.
-- Vector tie-break (27f9f2c): vector candidates with equal distance are ordered by chunk id. Reason: one hashing eval run in six gave different hybrid numbers, because equal-distance chunks came back in arbitrary order. The coordinator's check after the fix had ten of ten hashing runs identical; three consecutive runs were identical in the final measurement here.
+- Vector tie-break (27f9f2c): vector candidates with equal distance are ordered by chunk id. Reason: one hashing eval run in six gave different hybrid numbers, because equal-distance chunks came back in arbitrary order. After the fix ten consecutive hashing runs gave identical JSON.
 
-**Measured (top 5, 48 queries, hybrid overall; keyword-only hit@5 last).** Hashing and EmbeddingGemma rows for AND and flag-1 were measured twice each before the tie-break, identical each time; they were not re-measured after it. The shipped row was measured twice before the tie-break and then three times (hashing) and once (EmbeddingGemma) after it.
+**Measured (top 5, 48 queries, hybrid overall; keyword-only hit@5 last).** Hashing and EmbeddingGemma rows for AND and flag-1 were measured twice each before the tie-break, identical each time; they were not re-measured after it. The shipped row was measured twice before the tie-break and then three times (hashing) and twice (EmbeddingGemma) after it.
 
 | embedder | variant | hybrid hit@5 | hybrid recall@5 | hybrid MRR | hybrid nDCG@5 | keyword-only hit@5 | measured |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -148,7 +148,7 @@ Format:
 | hashing | any-term, capped (shipped) | 0.812 | 0.812 | 0.598 | 0.649 | 0.896 | after tie-break, 3 runs |
 | hashing | any-term + length norm (flag 1) | 0.812 | 0.812 | 0.612 | 0.660 | 0.875 | before tie-break, 2 runs |
 | EmbeddingGemma | AND (before) | 0.917 | 0.906 | 0.790 | 0.815 | 0.167 | before tie-break, 2 runs |
-| EmbeddingGemma | any-term, capped (shipped) | 0.896 | 0.896 | 0.832 | 0.845 | 0.896 | after tie-break, 1 run |
+| EmbeddingGemma | any-term, capped (shipped) | 0.896 | 0.896 | 0.832 | 0.845 | 0.896 | after tie-break, 2 runs |
 | EmbeddingGemma | any-term + length norm (flag 1) | 0.896 | 0.896 | 0.814 | 0.832 | 0.875 | before tie-break, 2 runs |
 
 The cap does not change these numbers: the largest gold query has 9 lexemes (`max lexeme count over the 48 gold queries = 9`, measured with Postgres plainto), so no query reaches 32. The shipped rows match the README tables line for line.

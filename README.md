@@ -158,7 +158,7 @@ Measured on 2026-11-27 with the any-term keyword leg, after the vector tie-break
 | keyword | mixed | 16 | 1.000 | 1.000 | 0.896 | 0.923 |
 | keyword | paraphrase | 16 | 0.688 | 0.688 | 0.443 | 0.503 |
 
-Measured with EmbeddingGemma 2 served locally through an OpenAI-style endpoint, 256 dimensions, no task prefixes (`embeddinggemma-2`, same corpus and queries, same date), once after the vector tie-break. Before the tie-break, two runs gave identical JSON, and one of six hashing runs did not, which is why the tie-break exists (ADR-014).
+Measured with EmbeddingGemma 2 served locally through an OpenAI-style endpoint, 256 dimensions, no task prefixes (`embeddinggemma-2`, same corpus and queries, same date), after the vector tie-break. Two consecutive runs gave identical JSON. Before the tie-break one of six hashing runs differed, which is why the tie-break exists (ADR-014).
 
 | mode | scope | queries | hit@5 | recall@5 | MRR | nDCG@5 |
 |---|---|---:|---:|---:|---:|---:|

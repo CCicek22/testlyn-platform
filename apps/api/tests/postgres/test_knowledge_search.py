@@ -864,3 +864,25 @@ async def test_keyword_timeout_setting_is_restored_after_a_normal_search(
 
     assert [r.document_title for r in outcome.results] == ["Alpha"]
     assert (await session.execute(text("SHOW statement_timeout"))).scalar_one() == "0"
+
+
+async def test_keyword_timeout_is_restored_inside_the_same_transaction(
+    session: AsyncSession,
+) -> None:
+    """A caller that keeps its transaction open gets its own timeout back, so a
+    later statement does not run under the keyword limit."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha note", title="Alpha")
+
+    hits = await search.keyword_candidates(
+        session,
+        org_id=org_id,
+        project_id=None,
+        query="alpha",
+        limit=5,
+        timeout_ms=5000,
+    )
+
+    assert len(hits) == 1
+    assert session.in_transaction()
+    assert (await session.execute(text("SHOW statement_timeout"))).scalar_one() == "0"
