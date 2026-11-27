@@ -6,14 +6,20 @@ holds. Spans of neighbouring chunks may overlap (see ``overlap_chars``).
 
 Rules
 -----
-- Headings (ATX ``#`` style) start a new section. ``heading`` on a chunk is the
-  heading path of its section, e.g. ``"Runbook > Rollback"``.
-- Paragraphs are separated by blank lines and packed into chunks up to
-  ``target_chars``.
-- Fenced code blocks (``` or ~~~) are atomic: never split, unless the block
-  alone exceeds ``target_chars``.
-- Overlap is only carried between consecutive chunks of one section, and only
-  when the previous chunk ends in a paragraph (never a code block).
+- Headings (ATX ``#`` style) are ordinary units for packing. ``heading`` on a
+  chunk is the heading path of the first unit in that chunk, e.g.
+  ``"Runbook > Rollback"``. Small consecutive sections share a chunk.
+- A run of heading lines with no body that does not fit is dropped from the
+  text (its path survives in later chunks). A chunk never consists only of
+  heading lines.
+- Paragraphs are separated by blank lines and packed up to ``target_chars``.
+- Fenced code blocks (``` or ~~~) are atomic. A unit larger than
+  ``target_chars - overlap_chars`` is split into pieces of at most that size,
+  so a chunk plus its overlap still fits in ``target_chars``.
+- Overlap is only carried from a paragraph into the next chunk. It never
+  starts inside a code block, and it snaps to a word boundary.
+- Guarantee: every chunk's text is at most ``target_chars`` long. Tokens with
+  no whitespace are hard-split at the piece size.
 - Plain text (no headings) works: the whole input is one section.
 """
 
@@ -27,7 +33,9 @@ DEFAULT_OVERLAP_CHARS = 150
 MAX_HEADING_CHARS = 300
 
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(\S.*?)[ \t]*$")
+# Matched against the line with trailing whitespace removed. The pattern
+# is linear: no nested or overlapping quantifiers, and the title runs to end.
+_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(\S.*)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,17 +55,17 @@ class _Segment:
     end: int
     kind: str  # "heading" | "code" | "para"
     path: str | None
-    section: int
 
 
 @dataclass(slots=True)
 class _Span:
     start: int
     end: int
-    path: str | None
-    section: int
+    path: str | None  # heading path of the first unit
+    last_path: str | None
     last_kind: str
     has_content: bool
+    floor: int  # overlap may not start before this (end of the last code unit)
 
 
 def chunk_markdown(
@@ -72,7 +80,7 @@ def chunk_markdown(
     if not 0 <= overlap_chars < target_chars:
         raise ValueError("overlap_chars must be >= 0 and < target_chars")
 
-    # Pieces leave room for the overlap, so an overlap always fits in a chunk.
+    # Pieces leave room for the overlap, so a chunk plus its overlap fits target.
     piece_limit = target_chars - overlap_chars
     units: list[_Segment] = []
     for seg in _segments(text):
@@ -102,7 +110,6 @@ def chunk_markdown(
 def _segments(text: str) -> list[_Segment]:
     segs: list[_Segment] = []
     titles: list[tuple[int, str]] = []
-    section = 0
     path: str | None = None
 
     para_start: int | None = None
@@ -113,7 +120,7 @@ def _segments(text: str) -> list[_Segment]:
     def flush_para() -> None:
         nonlocal para_start
         if para_start is not None:
-            segs.append(_Segment(para_start, para_end, "para", path, section))
+            segs.append(_Segment(para_start, para_end, "para", path))
             para_start = None
 
     pos = 0
@@ -124,7 +131,7 @@ def _segments(text: str) -> list[_Segment]:
         if fence is not None:
             stripped = line.strip()
             if stripped and set(stripped) <= {fence[0]} and len(stripped) >= fence[1]:
-                segs.append(_Segment(fence_start, pos, "code", path, section))
+                segs.append(_Segment(fence_start, pos, "code", path))
                 fence = None
             continue
 
@@ -140,7 +147,7 @@ def _segments(text: str) -> list[_Segment]:
             fence_start = start
             continue
 
-        heading_match = _HEADING_RE.match(line)
+        heading_match = _HEADING_RE.match(line.rstrip())
         if heading_match:
             flush_para()
             level = len(heading_match.group(1))
@@ -148,8 +155,7 @@ def _segments(text: str) -> list[_Segment]:
                 titles.pop()
             titles.append((level, heading_match.group(2)))
             path = " > ".join(title for _, title in titles)
-            section += 1
-            segs.append(_Segment(start, pos, "heading", path, section))
+            segs.append(_Segment(start, pos, "heading", path))
             continue
 
         if para_start is None:
@@ -157,13 +163,13 @@ def _segments(text: str) -> list[_Segment]:
         para_end = pos
 
     if fence is not None:
-        segs.append(_Segment(fence_start, len(text), "code", path, section))
+        segs.append(_Segment(fence_start, len(text), "code", path))
     flush_para()
     return segs
 
 
 def _split_oversized(text: str, seg: _Segment, limit: int) -> list[_Segment]:
-    """Break a segment larger than ``limit`` into line-packed pieces."""
+    """Split a segment larger than ``limit``: at whitespace, else hard at ``limit``."""
     if seg.end - seg.start <= limit:
         return [seg]
 
@@ -177,9 +183,31 @@ def _split_oversized(text: str, seg: _Segment, limit: int) -> list[_Segment]:
                 if text[k].isspace():
                     end = k + 1
                     break
-        pieces.append(_Segment(cursor, end, seg.kind, seg.path, seg.section))
+        pieces.append(_Segment(cursor, end, seg.kind, seg.path))
         cursor = end
     return pieces
+
+
+def _start_span(unit: _Segment, start: int, path: str | None) -> _Span:
+    return _Span(
+        start=start,
+        end=unit.end,
+        path=path,
+        last_path=unit.path,
+        last_kind=unit.kind,
+        has_content=unit.kind != "heading",
+        floor=unit.end if unit.kind == "code" else start,
+    )
+
+
+def _extend(cur: _Span, unit: _Segment) -> None:
+    cur.end = unit.end
+    cur.last_path = unit.path
+    cur.last_kind = unit.kind
+    if unit.kind != "heading":
+        cur.has_content = True
+    if unit.kind == "code":
+        cur.floor = unit.end
 
 
 def _pack(
@@ -188,44 +216,34 @@ def _pack(
     target: int,
     overlap: int,
 ) -> list[_Span]:
+    """Greedy packing. Invariant: every emitted span is at most ``target`` long."""
     out: list[_Span] = []
     cur: _Span | None = None
 
     for unit in units:
-        if unit.kind == "heading":
-            if cur is not None and cur.has_content:
-                out.append(cur)
-                cur = None
-            if cur is None:
-                cur = _Span(
-                    unit.start, unit.end, unit.path, unit.section, "heading", False
-                )
-            else:
-                # Consecutive headings with no body between: merge, keep the deepest path.
-                cur.end = unit.end
-                cur.path = unit.path
-                cur.section = unit.section
-            continue
-
         if cur is None:
-            cur = _Span(unit.start, unit.end, unit.path, unit.section, unit.kind, True)
+            cur = _start_span(unit, unit.start, unit.path)
             continue
 
         if unit.end - cur.start <= target:
-            cur.end = unit.end
-            cur.path = unit.path
-            cur.last_kind = unit.kind
-            cur.has_content = True
+            _extend(cur, unit)
             continue
 
-        prev = cur
-        out.append(prev)
+        if not cur.has_content:
+            # Heading-only run that does not fit: never emit it alone. Drop its
+            # lines; the cumulative heading path still reaches later chunks.
+            cur = _start_span(unit, unit.start, unit.path)
+            continue
+
+        out.append(cur)
         start = unit.start
-        if prev.last_kind == "para":
-            overlap_start = _overlap_start(text, prev, overlap)
+        path = unit.path
+        if unit.kind == "para" and cur.last_kind == "para":
+            overlap_start = _overlap_start(text, cur, overlap)
             if overlap_start is not None and unit.end - overlap_start <= target:
                 start = overlap_start
-        cur = _Span(start, unit.end, unit.path, unit.section, unit.kind, True)
+                path = cur.last_path
+        cur = _start_span(unit, start, path)
 
     if cur is not None and cur.has_content:
         out.append(cur)
@@ -236,7 +254,7 @@ def _overlap_start(text: str, prev: _Span, overlap: int) -> int | None:
     """Start of the tail of ``prev`` to repeat, snapped to a word boundary."""
     if overlap <= 0:
         return None
-    window_start = prev.end - overlap
+    window_start = max(prev.end - overlap, prev.floor)
     if window_start <= prev.start:
         return None
     for k in range(window_start, prev.end):
