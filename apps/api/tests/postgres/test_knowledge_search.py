@@ -561,3 +561,142 @@ async def test_search_settings_do_not_leak_to_the_pooled_connection(
         assert tuple(row) == ("off", "40")
     finally:
         await engine.dispose()
+
+
+# ── Keyword leg: any-term matching ────────────────────────────────────────────
+
+HOSTILE_QUERIES = [
+    "'alpha' | 'beta'",
+    "alpha & beta",
+    'alpha "beta"',
+    "alpha\\beta",
+    "alpha ! beta",
+    "alpha (beta) :* <-> gamma",
+    "alpha\x07beta",
+    "alpha\tbeta\r\n",
+    "ünïcödé alpha",
+    "alpha " + "x" * 3000 + " beta",
+    "a'b\"c`d",
+]
+
+
+async def _keyword_titles(
+    session: AsyncSession, org_id: uuid.UUID, query: str
+) -> list[str]:
+    outcome = await _search(
+        session, org_id=org_id, query=query, mode="keyword", top_k=10
+    )
+    return [r.document_title for r in outcome.results]
+
+
+async def test_keyword_any_term_returns_chunk_with_only_one_term(
+    session: AsyncSession,
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "Only alpha appears in this note.", title="Alpha")
+    await _ingest(session, org_id, "Nothing relevant here.", title="Other")
+
+    titles = await _keyword_titles(session, org_id, "alpha missingterm")
+
+    assert titles == ["Alpha"]
+
+
+async def test_keyword_ranks_more_matching_terms_first(session: AsyncSession) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha only here.", title="One term")
+    await _ingest(session, org_id, "alpha and beta together.", title="Two terms")
+
+    titles = await _keyword_titles(session, org_id, "alpha beta")
+
+    assert titles == ["Two terms", "One term"]
+
+
+@pytest.mark.parametrize("query", ["the and of", "!!! ... ???", "a an the", "  "])
+async def test_stopword_or_punctuation_only_query_returns_nothing(
+    session: AsyncSession, query: str
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "The alpha note of the day.", title="Note")
+
+    assert await _keyword_titles(session, org_id, query) == []
+
+
+@pytest.mark.parametrize("query", HOSTILE_QUERIES)
+async def test_hostile_keyword_input_never_raises(
+    session: AsyncSession, query: str
+) -> None:
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha beta gamma delta", title="Note")
+
+    outcome = await _search(session, org_id=org_id, query=query, mode="keyword")
+
+    assert isinstance(outcome.results, list)
+
+
+async def test_quotes_and_operators_do_not_change_the_meaning(
+    session: AsyncSession,
+) -> None:
+    """Injected syntax is dropped: the query means the same as its plain words."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "alpha note", title="Alpha")
+    await _ingest(session, org_id, "beta note", title="Beta")
+    await _ingest(session, org_id, "gamma note", title="Gamma")
+    plain = await _keyword_titles(session, org_id, "alpha beta")
+
+    for query in [
+        "'alpha' | 'beta'",
+        "alpha & beta",
+        "alpha:* | beta",
+        "(alpha) !beta",
+    ]:
+        assert await _keyword_titles(session, org_id, query) == ["Alpha", "Beta"]
+    assert plain == ["Alpha", "Beta"]
+
+
+async def test_quoted_phrase_is_matched_as_loose_terms(session: AsyncSession) -> None:
+    """Pinned loss: websearch phrase quotes are gone. "gate timeout" matches
+    a chunk that has only "timeout", as an unquoted term would."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "The timeout is long.", title="Timeout only")
+
+    assert await _keyword_titles(session, org_id, '"gate timeout"') == ["Timeout only"]
+
+
+async def test_minus_term_is_not_excluded(session: AsyncSession) -> None:
+    """Pinned loss: websearch exclusion (-term) is gone. The excluded word
+    still matches, so a chunk with only "beta" is returned."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "beta alone.", title="Beta")
+
+    assert await _keyword_titles(session, org_id, "alpha -beta") == ["Beta"]
+
+
+async def test_or_keyword_is_a_stopword_now(session: AsyncSession) -> None:
+    """Pinned loss: websearch "or" is no longer an operator. It is dropped as a
+    stopword, so the query is the same as "alpha beta"."""
+    org_id = await _org(session)
+    await _ingest(session, org_id, "beta alone.", title="Beta")
+
+    assert await _keyword_titles(session, org_id, "alpha or beta") == ["Beta"]
+
+
+async def test_any_term_keyword_respects_org_and_project_scope(
+    session: AsyncSession,
+) -> None:
+    org_a = await _org(session)
+    org_b = await _org(session)
+    project = await _project(session, org_a, "Scoped")
+    await _ingest(session, org_a, "alpha in org a", title="Org A")
+    await _ingest(
+        session, org_a, "alpha in project", title="Project", project_id=project
+    )
+    await _ingest(session, org_b, "alpha in org b", title="Org B")
+
+    assert sorted(await _keyword_titles(session, org_a, "alpha")) == [
+        "Org A",
+        "Project",
+    ]
+    scoped = await _search(
+        session, org_id=org_a, query="alpha", mode="keyword", project_id=project
+    )
+    assert sorted(r.document_title for r in scoped.results) == ["Org A", "Project"]

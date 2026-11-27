@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 import structlog
-from sqlalchemy import cast, column, func, literal, or_, select
-from sqlalchemy.dialects.postgresql import REGCONFIG, TSVECTOR
+from sqlalchemy import Text, cast, column, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import REGCONFIG, TSQUERY, TSVECTOR
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from testlyn_api.knowledge.embeddings import Embedder, EmbeddingError
@@ -216,9 +216,14 @@ async def vector_candidates(
 
 
 def keyword_tsquery(query: str):  # type: ignore[no-untyped-def]
-    """websearch_to_tsquery with the language bound as a REGCONFIG parameter."""
+    """Any-term tsquery: plainto_tsquery ANDs the words, so AND becomes OR.
+
+    plainto_tsquery emits quoted lexemes joined only by " & " (no spaces inside a
+    lexeme), so the replace touches separators only.
+    """
     language = cast(literal(SEARCH_LANGUAGE), REGCONFIG)
-    return func.websearch_to_tsquery(language, query)
+    anded = cast(func.plainto_tsquery(language, query), Text)
+    return cast(func.replace(anded, " & ", " | "), TSQUERY)
 
 
 def keyword_match(query: str):  # type: ignore[no-untyped-def]
@@ -251,7 +256,7 @@ async def keyword_candidates(
     query: str,
     limit: int,
 ) -> list[Hit]:
-    """Full-text matches ranked by ts_rank_cd. websearch syntax never raises."""
+    """Any-term full-text matches ranked by ts_rank_cd. Query text never raises."""
     stmt = build_keyword_statement(
         org_id=org_id, project_id=project_id, query=query, limit=limit
     )
