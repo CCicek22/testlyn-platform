@@ -124,7 +124,7 @@ Run it against an empty, migrated Postgres 18 with pgvector. Set the URL with `-
 
 ```sh
 cd apps/api
-KNOWLEDGE_EVAL_DATABASE_URL=postgresql+asyncpg://testlyn_api:localdev@127.0.0.1:5432/testlyn \
+KNOWLEDGE_EVAL_DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@localhost:5432/testlyn \
   uv run --frozen python -m testlyn_api.knowledge.evaluation --json-out eval-report.json
 ```
 
