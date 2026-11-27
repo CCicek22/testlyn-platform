@@ -116,6 +116,76 @@ TEST_POSTGRES_URL=postgresql+asyncpg://postgres:localdev@127.0.0.1:55432/testlyn
 
 These tests drop and recreate the `public` schema of the database they point at. Use a throwaway database.
 
+### Evaluating retrieval
+
+`apps/api/evals/knowledge/` holds a synthetic gold set: 12 fictional Markdown documents (29 chunks) and 48 queries (16 `paraphrase`, 16 `keyword`, 16 `mixed`). A chunk is relevant to a gold entry when it comes from the named document and its text contains `answer_span`. Each span occurs exactly once in its document and lies inside one chunk, no two queries share a (document, span) pair, and the loader enforces all three. Invented names only; `example.com` for hosts.
+
+Run it against an empty, migrated Postgres 18 with pgvector. Set the URL with `--database-url` or `KNOWLEDGE_EVAL_DATABASE_URL`. The CLI does not read `TEST_POSTGRES_URL`, because the postgres test suite drops that schema. The run takes a session advisory lock, so two runs cannot overlap. It creates one org, `knowledge-evaluation`, ingests the corpus, runs every query in `hybrid`, `vector` and `keyword` mode at top_k 5, and deletes what it created, also on failure. It refuses to start when that org already holds documents.
+
+```sh
+cd apps/api
+KNOWLEDGE_EVAL_DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@localhost:5432/testlyn \
+  uv run --frozen python -m testlyn_api.knowledge.evaluation --json-out eval-report.json
+```
+
+`--embedder openai-compat` points the same run at an OpenAI-style `/embeddings` server. Set `--embedding-base-url` and `--embedding-model`; the API key comes from `KNOWLEDGE_EMBEDDING_API_KEY`. `--embedding-dim` must be 256, the width of the vector column. The harness uses fixed deadlines, not the service settings: 10 seconds for each query embedding and search, 120 seconds for the corpus ingest (`SEARCH_DEADLINE_S` and `INGEST_DEADLINE_S` in `runner.py`).
+
+`--judge --judge-model <name>` also grades each retrieved passage with a Gemini model on Vertex AI (project from `GCP_PROJECT_ID`, location from `VERTEX_AI_LOCATION`). Each (query, chunk) pair is judged once per run, even when several modes retrieve it. Judge calls use temperature 0 and a 1024-token output cap. This makes paid model calls, so it is off by default. See ADR-013 for what it measures. The judge has never been run against a real model; no judge numbers are published.
+
+Metrics, per query, on the top 5 results. Duplicate result ids take no extra rank.
+
+- `hit@5`: 1 if any of the top 5 is a gold match.
+- `recall@5`: share of the gold entries covered by the top 5. A query with two gold entries scores 0.5 when only one is retrieved.
+- `MRR`: 1 / rank of the first gold match within the top 5, else 0.
+- `nDCG@5`: binary-gain discounted cumulative gain over the top 5, divided by the ideal value for the query.
+
+Measured with the hashing embedder on 2026-11-27 (`hashing-256-v1`, 12 documents, 29 chunks, 48 queries, top_k 5):
+
+| mode | scope | queries | hit@5 | recall@5 | MRR | nDCG@5 |
+|---|---|---:|---:|---:|---:|---:|
+| hybrid | overall | 48 | 0.604 | 0.604 | 0.448 | 0.486 |
+| hybrid | keyword | 16 | 0.750 | 0.750 | 0.615 | 0.648 |
+| hybrid | mixed | 16 | 0.875 | 0.875 | 0.664 | 0.716 |
+| hybrid | paraphrase | 16 | 0.188 | 0.188 | 0.065 | 0.095 |
+| vector | overall | 48 | 0.521 | 0.521 | 0.302 | 0.356 |
+| vector | keyword | 16 | 0.562 | 0.562 | 0.242 | 0.319 |
+| vector | mixed | 16 | 0.812 | 0.812 | 0.601 | 0.653 |
+| vector | paraphrase | 16 | 0.188 | 0.188 | 0.065 | 0.095 |
+| keyword | overall | 48 | 0.167 | 0.167 | 0.167 | 0.167 |
+| keyword | keyword | 16 | 0.438 | 0.438 | 0.438 | 0.438 |
+| keyword | mixed | 16 | 0.062 | 0.062 | 0.062 | 0.062 |
+| keyword | paraphrase | 16 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+Measured with EmbeddingGemma 2 served locally through an OpenAI-style endpoint, 256 dimensions, no task prefixes (`embeddinggemma-2`, same corpus and queries, same date). Two consecutive runs gave identical JSON.
+
+| mode | scope | queries | hit@5 | recall@5 | MRR | nDCG@5 |
+|---|---|---:|---:|---:|---:|---:|
+| hybrid | overall | 48 | 0.917 | 0.906 | 0.790 | 0.815 |
+| hybrid | keyword | 16 | 0.938 | 0.938 | 0.828 | 0.851 |
+| hybrid | mixed | 16 | 1.000 | 0.969 | 0.938 | 0.939 |
+| hybrid | paraphrase | 16 | 0.812 | 0.812 | 0.603 | 0.654 |
+| vector | overall | 48 | 0.896 | 0.885 | 0.743 | 0.774 |
+| vector | keyword | 16 | 0.875 | 0.875 | 0.688 | 0.730 |
+| vector | mixed | 16 | 1.000 | 0.969 | 0.938 | 0.939 |
+| vector | paraphrase | 16 | 0.812 | 0.812 | 0.603 | 0.654 |
+| keyword | overall | 48 | 0.167 | 0.167 | 0.167 | 0.167 |
+| keyword | keyword | 16 | 0.438 | 0.438 | 0.438 | 0.438 |
+| keyword | mixed | 16 | 0.062 | 0.062 | 0.062 | 0.062 |
+| keyword | paraphrase | 16 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+Baseline and limits:
+
+- A random ranker over the 29 chunks scores hit@5 = 5/29 = 0.172 for a query with one gold entry. Queries with several gold entries score higher by chance. Recompute if the chunk count changes.
+- Hashing paraphrase rows (0.188 hybrid and vector) sit at that chance level. Only the EmbeddingGemma run shows paraphrase retrieval working.
+- With 48 queries, one query moves a kind row by 0.0625 (1 of 16) and an overall row by about 0.021 (1 of 48).
+- Paraphrase queries are checked against long words only (six letters or more). They still share short words with their spans, such as "the" and "and".
+- The corpus is synthetic and small. It does not represent production content or query volume.
+- Keyword mode returned no rows for 40 of 48 queries. `websearch_to_tsquery` requires every non-stopword of the query to appear in the chunk, so a natural-language question rarely matches. Hybrid still returns the vector leg's results, so the hybrid row is not hurt the same way. Changing this is a separate change to `search.py`, not part of this harness.
+- On `kind=keyword`, vector beat keyword mode in the hashing run (0.562 vs 0.438 hit@5). The expectation that keyword wins on exact tokens does not hold for this set and this query style.
+- No judge numbers are included. The judge has not been run against a real model.
+
+The gate (`tests/postgres/test_knowledge_eval.py`, run by the CI `postgres` job) uses the hashing embedder and asserts, with the measured values in brackets: hybrid overall hit@5 at least 27/48 (29/48); hybrid overall nDCG@5 at least 0.44 (0.486); hybrid keyword-kind hit@5 at least 11/16 (12/16); hybrid mixed-kind hit@5 at least 13/16 (14/16); and hybrid overall hit@5 no more than 0.05 below the better single leg (vector 25/48 = 0.521, so at least 0.471). Kind rows have 16 queries and each allows one query of slack; overall rows allow two of 48. The gate also checks that two runs give identical metrics, that a failing run removes what it created, that a second run is refused while one holds the lock, and that another org's rows are unchanged.
+
 ## License
 
 © 2026 Mack Cicek. All rights reserved. Source is published for review; no licence is granted.
