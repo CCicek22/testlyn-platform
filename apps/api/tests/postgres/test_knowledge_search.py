@@ -641,7 +641,9 @@ async def test_quotes_and_operators_do_not_change_the_meaning(
     await _ingest(session, org_id, "alpha note", title="Alpha")
     await _ingest(session, org_id, "beta note", title="Beta")
     await _ingest(session, org_id, "gamma note", title="Gamma")
-    plain = await _keyword_titles(session, org_id, "alpha beta")
+    # Alpha and Beta rank equally, so their order follows the chunk id: compare
+    # as sorted lists.
+    plain = sorted(await _keyword_titles(session, org_id, "alpha beta"))
 
     for query in [
         "'alpha' | 'beta'",
@@ -649,7 +651,7 @@ async def test_quotes_and_operators_do_not_change_the_meaning(
         "alpha:* | beta",
         "(alpha) !beta",
     ]:
-        assert await _keyword_titles(session, org_id, query) == ["Alpha", "Beta"]
+        assert sorted(await _keyword_titles(session, org_id, query)) == plain
     assert plain == ["Alpha", "Beta"]
 
 
