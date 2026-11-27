@@ -284,7 +284,9 @@ async def test_second_run_is_refused_while_first_holds_the_lock(
         await s.commit()
 
 
-async def test_lock_is_released_after_a_run(engine: AsyncEngine, migrated: None) -> None:
+async def test_lock_is_released_after_a_run(
+    engine: AsyncEngine, migrated: None
+) -> None:
     await run_evaluation(engine, dataset=_dataset(), embedder=HashingEmbedder())
     async with engine.connect() as probe:
         got = await probe.scalar(select(func.pg_try_advisory_lock(EVAL_LOCK_KEY)))
