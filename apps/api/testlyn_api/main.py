@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from testlyn_api.chat.routes import router as chat_router
+from testlyn_api.knowledge.routes import router as knowledge_router
 from testlyn_api.config import Settings, get_settings
 from testlyn_api.core.firebase import init_firebase
 from testlyn_api.core.ip_allowlist import IPAllowlistMiddleware
@@ -149,6 +150,7 @@ app.include_router(scim.router)
 app.include_router(enterprise.router)
 app.include_router(graphql_router)
 app.include_router(chat_router)
+app.include_router(knowledge_router)
 
 
 @app.get("/health", include_in_schema=False)
