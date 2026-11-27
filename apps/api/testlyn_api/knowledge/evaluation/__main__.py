@@ -39,8 +39,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="testlyn_api.knowledge.evaluation")
     parser.add_argument(
         "--database-url",
-        default=os.environ.get("TEST_POSTGRES_URL", ""),
-        help="asyncpg URL of an empty, migrated database (default: $TEST_POSTGRES_URL)",
+        default=os.environ.get("KNOWLEDGE_EVAL_DATABASE_URL", ""),
+        help="asyncpg URL of an empty, migrated database (default: $KNOWLEDGE_EVAL_DATABASE_URL)",
     )
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--queries", type=Path, default=DEFAULT_QUERIES)
@@ -113,7 +113,9 @@ async def _check_migrated(engine: AsyncEngine) -> None:
 
 async def _run(args: argparse.Namespace) -> int:
     if not args.database_url:
-        print("error: set --database-url or TEST_POSTGRES_URL", file=sys.stderr)
+        print(
+            "error: set --database-url or KNOWLEDGE_EVAL_DATABASE_URL", file=sys.stderr
+        )
         return 2
     dataset = load_eval_set(args.corpus, args.queries)
     embedder = _build_embedder(args)
