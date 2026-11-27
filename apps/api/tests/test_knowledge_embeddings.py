@@ -283,3 +283,30 @@ async def test_openai_compat_rejects_non_finite_values(bad: str) -> None:
     )
     with pytest.raises(EmbeddingError, match="non-finite"):
         await embedder.embed(["a"])
+
+
+async def test_openai_compat_huge_integer_becomes_embedding_error() -> None:
+    dim = KNOWLEDGE_EMBEDDING_DIM
+    values = ["0.0"] * dim
+    values[3] = "9" * 400  # valid JSON integer that float() cannot convert
+    payload = ('{"data":[{"index":0,"embedding":[' + ",".join(values) + "]}]}").encode()
+    embedder = OpenAICompatEmbedder(
+        base_url="http://embed.test/v1", model="m", transport=_raw_response(payload)
+    )
+    with pytest.raises(EmbeddingError, match="malformed"):
+        await embedder.embed(["a"])
+
+
+async def test_openai_compat_deeply_nested_json_becomes_embedding_error() -> None:
+    payload = b'{"data":' + b"[" * 100_000 + b"]" * 100_000 + b"}"
+    embedder = OpenAICompatEmbedder(
+        base_url="http://embed.test/v1", model="m", transport=_raw_response(payload)
+    )
+    with pytest.raises(EmbeddingError, match="malformed"):
+        await embedder.embed(["a"])
+
+
+async def test_openai_compat_invalid_url_becomes_embedding_error() -> None:
+    embedder = OpenAICompatEmbedder(base_url="http://[::1", model="m")
+    with pytest.raises(EmbeddingError, match="request failed"):
+        await embedder.embed(["a"])

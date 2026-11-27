@@ -123,7 +123,7 @@ class OpenAICompatEmbedder:
                 json={"model": self.model_name, "input": batch},
                 headers=headers,
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL) as exc:
             raise EmbeddingError(
                 f"embedding request failed: {type(exc).__name__}"
             ) from exc
@@ -137,14 +137,18 @@ class OpenAICompatEmbedder:
             indices = [item["index"] for item in data]
             ordered = sorted(data, key=lambda item: item["index"])
             vectors = [[float(x) for x in item["embedding"]] for item in ordered]
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, OverflowError, RecursionError) as exc:
             raise EmbeddingError("embedding response is malformed") from exc
 
         if len(vectors) != len(batch):
             raise EmbeddingError(
                 f"embedding response has {len(vectors)} vectors for {len(batch)} inputs"
             )
-        if sorted(indices) != list(range(len(batch))):
+        try:
+            indices_match = sorted(indices) == list(range(len(batch)))
+        except TypeError:
+            indices_match = False
+        if not indices_match:
             raise EmbeddingError("embedding response indices do not match the batch")
         for vec in vectors:
             if len(vec) != self.dim:
