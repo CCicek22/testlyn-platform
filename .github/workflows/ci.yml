@@ -37,6 +37,36 @@ jobs:
           uv sync --frozen --all-extras
           uv run --frozen pytest
 
+  postgres:
+    name: Postgres tests (pgvector)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg18
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: testlyn_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d testlyn_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Install workspace dependencies
+        run: uv sync --all-packages --all-extras --frozen
+
+      - name: Migrations and Postgres-only tests
+        working-directory: apps/api
+        env:
+          TEST_POSTGRES_URL: postgresql+asyncpg://postgres:ci-only@127.0.0.1:5432/testlyn_test
+        run: uv run --frozen pytest -m postgres
+
   web:
     name: Web typecheck, lint and unit tests
     runs-on: ubuntu-latest
