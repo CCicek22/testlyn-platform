@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+
+      - name: Install workspace dependencies
+        run: uv sync --all-packages --all-extras --frozen
+
+      - name: API tests
+        working-directory: apps/api
+        run: uv run --frozen pytest
+
+      - name: Engine sidecar tests
+        working-directory: apps/engine
+        run: uv run --frozen pytest sidecar
+
+      - name: Report builder tests
+        working-directory: apps/report-builder
+        run: uv run --frozen pytest
+
+      - name: Locator healer tests
+        working-directory: apps/locator-healer
+        run: |
+          uv sync --frozen --all-extras
+          uv run --frozen pytest
+
+  web:
+    name: Web typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck shared and ui packages
+        run: pnpm --filter @testlyn/shared --filter @testlyn/ui run typecheck
+
+      - name: Typecheck web app
+        run: pnpm --filter @testlyn/web run typecheck
+
+      - name: Lint web app
+        run: pnpm --filter @testlyn/web run lint
+
+      - name: Unit tests
+        run: pnpm --filter @testlyn/web run test
