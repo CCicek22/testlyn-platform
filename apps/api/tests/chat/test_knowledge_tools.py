@@ -135,7 +135,8 @@ async def test_no_project_means_org_wide(monkeypatch: pytest.MonkeyPatch) -> Non
     _patched_client(monkeypatch, _recording_transport(calls))
 
     await knowledge_tools.search_knowledge(
-        "q", tool_context=_ctx(**{SESSION_KEY_ORG_ID: _ORG})  # type: ignore[arg-type]
+        "q",
+        tool_context=_ctx(**{SESSION_KEY_ORG_ID: _ORG}),  # type: ignore[arg-type]
     )
 
     assert "project_id" not in calls[0]["body"]
@@ -159,7 +160,8 @@ async def test_missing_org_returns_error_without_calling_api(
     _patched_client(monkeypatch, _recording_transport(calls))
 
     result = await knowledge_tools.search_knowledge(
-        "q", tool_context=_ctx()  # type: ignore[arg-type]
+        "q",
+        tool_context=_ctx(),  # type: ignore[arg-type]
     )
 
     assert result["ok"] is False
@@ -174,7 +176,8 @@ async def test_empty_query_returns_error_without_calling_api(
     _patched_client(monkeypatch, _recording_transport(calls))
 
     result = await knowledge_tools.search_knowledge(
-        "   ", tool_context=_ctx(**{SESSION_KEY_ORG_ID: _ORG})  # type: ignore[arg-type]
+        "   ",
+        tool_context=_ctx(**{SESSION_KEY_ORG_ID: _ORG}),  # type: ignore[arg-type]
     )
 
     assert result["ok"] is False
