@@ -1,6 +1,6 @@
 # Runbook: spool backlog
 
-Owner: Lantern team. Applies to the Brackwater `spool` service, which queues
+Owner: Marrow team. Applies to the Brackwater `spool` service, which queues
 jobs between the `gate` API and the `relay` workers.
 
 ## Symptoms

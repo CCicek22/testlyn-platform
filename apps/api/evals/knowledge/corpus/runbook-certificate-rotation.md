@@ -1,6 +1,6 @@
 # Runbook: certificate rotation
 
-Owner: Lantern team. Covers the TLS certificates for the public `gate` host and
+Owner: Marrow team. Covers the TLS certificates for the public `gate` host and
 the internal `relay` mesh.
 
 ## Schedule

@@ -1,6 +1,6 @@
 # Incident note: gate timeouts during the March import
 
-Status: closed. Severity: SEV-2. Owner: Lantern team.
+Status: closed. Severity: SEV-2. Owner: Marrow team.
 
 ## Summary
 

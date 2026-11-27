@@ -1,6 +1,6 @@
 # Runbook: database failover
 
-Owner: Lantern team. Covers the `ledger` Postgres cluster that stores run
+Owner: Marrow team. Covers the `ledger` Postgres cluster that stores run
 metadata and org settings.
 
 ## When to fail over
